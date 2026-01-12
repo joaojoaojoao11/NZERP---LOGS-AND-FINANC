@@ -507,4 +507,20 @@ export class FinanceService {
       return { success: false, message: e.message };
     }
   }
+
+  static async sendTitlesToNotary(titleIds: string[], user: User): Promise<{ success: boolean; message?: string }> {
+    try {
+      if (!supabase) return { success: false, message: 'DB Offline' };
+      
+      const { error } = await supabase.from('accounts_receivable')
+        .update({ status_cobranca: 'CARTORIO', situacao: 'EM CARTORIO' })
+        .in('id', titleIds);
+
+      if (error) throw error;
+
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, message: e.message };
+    }
+  }
 }

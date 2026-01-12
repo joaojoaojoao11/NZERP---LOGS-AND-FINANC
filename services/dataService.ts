@@ -143,17 +143,42 @@ export class DataService {
     const ar = await this.getAccountsReceivable();
     const today = new Date(); today.setHours(0,0,0,0);
     const debtorsMap: Record<string, DebtorInfo> = {};
+    
     ar.filter(t => t.saldo > 0.01 && !t.id_acordo).forEach(t => {
       const dueDate = new Date(t.data_vencimento!); if (dueDate >= today) return;
+      
       if (!debtorsMap[t.cliente]) {
-        debtorsMap[t.cliente] = { cliente: t.cliente, totalVencido: 0, vencidoAte15d: 0, vencidoMais15d: 0, enviarCartorio: 0, qtdTitulos: 0, statusCobranca: 'PENDENTE', protocoloAtual: `COB-${Date.now().toString().slice(-6)}`, enviadoCartorio: false };
+        debtorsMap[t.cliente] = { 
+          cliente: t.cliente, 
+          totalVencido: 0, 
+          vencidoAte15d: 0, 
+          vencidoMais15d: 0, 
+          enviarCartorio: 0, // Agora armazena valor em cartório
+          qtdTitulos: 0, 
+          statusCobranca: 'PENDENTE', 
+          protocoloAtual: `COB-${Date.now().toString().slice(-6)}`, 
+          enviadoCartorio: false 
+        };
       }
+      
       const info = debtorsMap[t.cliente]; 
       info.totalVencido += t.saldo; 
       info.qtdTitulos += 1;
-      const diffDays = Math.ceil((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-      if (diffDays <= 15) info.vencidoAte15d += t.saldo; else info.vencidoMais15d += t.saldo;
+
+      // Lógica atualizada para buckets
+      if (t.statusCobranca === 'CARTORIO') {
+        info.enviarCartorio += t.saldo;
+        info.enviadoCartorio = true;
+      } else {
+        const diffDays = Math.ceil((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays <= 15) {
+          info.vencidoAte15d += t.saldo; 
+        } else {
+          info.vencidoMais15d += t.saldo;
+        }
+      }
     });
+    
     return Object.values(debtorsMap).sort((a, b) => b.totalVencido - a.totalVencido);
   }
 

@@ -22,8 +22,9 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
   const [clientHistory, setClientHistory] = useState<CollectionHistory[]>([]);
   const [isSubmittingInteraction, setIsSubmittingInteraction] = useState(false);
   
-  // Estados do Acordo (Settlement)
+  // Estados do Acordo (Settlement) & Cartório
   const [isNegotiating, setIsNegotiating] = useState(false);
+  const [isNotarySelection, setIsNotarySelection] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
   const [selectedForAgreement, setSelectedForAgreement] = useState<string[]>([]);
   const [viewingSettlement, setViewingSettlement] = useState<Settlement | null>(null);
@@ -91,6 +92,64 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSendToCartorio = async () => {
+    if (selectedForAgreement.length === 0) return;
+    if (!window.confirm(`Confirma o envio de ${selectedForAgreement.length} títulos para protesto em cartório?`)) return;
+
+    setIsSubmittingInteraction(true);
+    try {
+      const res = await FinanceService.sendTitlesToNotary(selectedForAgreement, currentUser);
+      if (res.success) {
+        await FinanceService.addCollectionHistory({
+          cliente: selectedClient!,
+          acao_tomada: 'CARTORIO',
+          observacao: `ENVIO PARA PROTESTO: ${selectedForAgreement.length} TÍTULOS. VALOR TOTAL: R$ ${totalSelectedForAgreement.toFixed(2)}`,
+          data_proxima_acao: undefined,
+          valor_devido: totalSelectedForAgreement,
+          dias_atraso: 0,
+          usuario: currentUser.name
+        });
+        setToast({ msg: 'TÍTULOS ENVIADOS PARA CARTÓRIO!', type: 'success' });
+        setIsNotarySelection(false);
+        setSelectedForAgreement([]);
+        fetchData();
+        setSelectedClient(null); // Volta pra lista para ver atualização
+      } else {
+        setToast({ msg: res.message || 'Erro ao processar envio.', type: 'error' });
+      }
+    } catch (e) {
+      setToast({ msg: 'Erro de conexão.', type: 'error' });
+    } finally {
+      setIsSubmittingInteraction(false);
+    }
+  };
+
+  const handleQuickAction = (actionType: 'AGENDAR' | 'RETORNOU' | 'SEM_RETORNO' | 'CARTORIO') => {
+    if (actionType === 'CARTORIO') {
+      setIsNotarySelection(true);
+      setIsNegotiating(false);
+      setSelectedForAgreement([]);
+      setToast({ msg: 'Selecione os títulos para envio.', type: 'success' });
+      return;
+    }
+
+    let obs = '';
+    let acao = 'Outros';
+
+    if (actionType === 'AGENDAR') {
+      acao = 'Agendamento';
+      obs = 'CLIENTE PROMETEU PAGAMENTO PARA: ';
+    } else if (actionType === 'RETORNOU') {
+      acao = 'Retorno';
+      obs = 'CLIENTE RETORNOU CONTATO: ';
+    } else if (actionType === 'SEM_RETORNO') {
+      acao = 'Tentativa';
+      obs = 'TENTATIVA DE CONTATO SEM SUCESSO.';
+    }
+
+    setInteractionForm({ acao, observacao: obs, proximaAcao: '' });
   };
 
   const handleViewSettlement = async (s: Settlement) => {
@@ -345,24 +404,47 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
           {activeMainTab === 'CARTEIRA' ? (
             <div className="grid grid-cols-1 gap-4">
               {filteredDebtors.map(d => (
-                <div key={d.cliente} className="bg-white border border-slate-100 p-6 rounded-[2rem] shadow-sm hover:border-blue-300 transition-all group flex flex-col md:flex-row justify-between items-center gap-6">
-                   <div className="flex-1">
+                <div key={d.cliente} className="bg-white border border-slate-100 p-6 rounded-[2rem] shadow-sm hover:border-blue-300 transition-all group flex flex-col xl:flex-row justify-between items-center gap-6">
+                   <div className="flex-1 w-full xl:w-auto">
                       <div className="flex items-center gap-3 mb-1">
                          <h3 className="font-black text-slate-900 uppercase italic text-lg tracking-tight">{d.cliente}</h3>
                          {d.vencidoMais15d > 0 && <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded-lg text-[7px] font-black uppercase tracking-widest animate-pulse border border-red-100">Risco Alto</span>}
                       </div>
                       <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{d.qtdTitulos} Títulos em aberto</p>
                    </div>
-                   <div className="grid grid-cols-2 md:grid-cols-3 gap-8 text-center md:text-right">
-                      <div>
-                         <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Vencido</p>
+                   
+                   {/* Grid de Detalhamento Financeiro */}
+                   <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center items-center w-full xl:w-auto">
+                      {/* 1. Total Vencido */}
+                      <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 min-w-[100px]">
+                         <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Vencido</p>
                          <p className="text-sm font-black text-slate-900 italic">R$ {d.totalVencido.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
                       </div>
+
+                      {/* 2. 0 a 15 Dias */}
+                      <div className="bg-amber-50 p-3 rounded-2xl border border-amber-100 min-w-[100px]">
+                         <p className="text-[7px] font-black text-amber-600 uppercase tracking-widest mb-1">0 a 15 Dias</p>
+                         <p className="text-sm font-black text-amber-700 italic">R$ {d.vencidoAte15d.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                      </div>
+
+                      {/* 3. 15+ Dias (Crítico) */}
+                      <div className="bg-red-50 p-3 rounded-2xl border border-red-100 min-w-[100px]">
+                         <p className="text-[7px] font-black text-red-600 uppercase tracking-widest mb-1">15+ Dias</p>
+                         <p className="text-sm font-black text-red-700 italic">R$ {d.vencidoMais15d.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                      </div>
+
+                      {/* 4. Em Cartório - NOVA COLUNA */}
+                      <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800 min-w-[100px] text-white">
+                         <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">Em Cartório</p>
+                         <p className="text-sm font-black text-white italic">R$ {(d.enviarCartorio || 0).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                      </div>
+
+                      {/* 5. Ação */}
                       <button 
                         onClick={() => handleManageClient(d.cliente)}
-                        className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg italic"
+                        className="px-6 py-4 bg-blue-600 text-white rounded-2xl font-black text-[9px] uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg italic h-full"
                       >
-                        Gerenciar CRM
+                        Gerenciar
                       </button>
                    </div>
                 </div>
@@ -444,13 +526,13 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
         /* CRM DO CLIENTE */
         <div className="animate-in slide-in-from-right-4 duration-500 space-y-8">
            <div className="flex items-center justify-between">
-              <button onClick={() => { setSelectedClient(null); setIsNegotiating(false); setSelectedForAgreement([]); }} className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors font-black text-[10px] uppercase tracking-widest">
+              <button onClick={() => { setSelectedClient(null); setIsNegotiating(false); setIsNotarySelection(false); setSelectedForAgreement([]); }} className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors font-black text-[10px] uppercase tracking-widest">
                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" strokeWidth="3"/></svg>
                  Voltar para Fila
               </button>
               <div className="flex gap-3">
                  <button 
-                   onClick={() => setIsNegotiating(!isNegotiating)}
+                   onClick={() => { setIsNegotiating(!isNegotiating); setIsNotarySelection(false); setSelectedForAgreement([]); }}
                    className={`px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center gap-2 italic transition-all ${isNegotiating ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
                  >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -463,29 +545,33 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
               <div className="lg:col-span-8 space-y-8">
                  <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden">
                     {isNegotiating && <div className="absolute top-0 left-0 w-full h-2 bg-blue-600 animate-pulse"></div>}
+                    {isNotarySelection && <div className="absolute top-0 left-0 w-full h-2 bg-slate-900 animate-pulse"></div>}
                     <h2 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter mb-8 leading-none">{selectedClient}</h2>
                     <div className="space-y-6">
-                       <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest italic">{isNegotiating ? 'SELECIONE OS TÍTULOS PARA O ACORDO' : 'DOSSIÊ FINANCEIRO (SOMENTE BOLETOS VENCIDOS)'}</p>
+                       <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest italic">
+                          {isNegotiating ? 'SELECIONE OS TÍTULOS PARA O ACORDO' : isNotarySelection ? 'SELECIONE TÍTULOS PARA CARTÓRIO' : 'DOSSIÊ FINANCEIRO'}
+                       </p>
                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {clientTitles.length > 0 ? clientTitles.map(t => {
-                            const isBlocked = t.statusCobranca === 'BLOQUEADO_ACORDO';
+                            const isBlocked = t.statusCobranca === 'BLOQUEADO_ACORDO' || t.statusCobranca === 'CARTORIO';
                             const days = calculateDaysOverdue(t.data_vencimento);
                             const isSelected = selectedForAgreement.includes(t.id);
+                            const canSelect = isNegotiating || isNotarySelection;
                             
                             return (
                                <div 
                                  key={t.id} 
-                                 onClick={() => !isBlocked && isNegotiating && toggleTitleSelection(t.id)}
+                                 onClick={() => !isBlocked && canSelect && toggleTitleSelection(t.id)}
                                  className={`p-6 border rounded-[2rem] space-y-4 transition-all group relative ${
                                     isBlocked 
                                     ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed' 
-                                    : isNegotiating 
+                                    : canSelect 
                                       ? isSelected ? 'bg-blue-50 border-blue-600 cursor-pointer shadow-md' : 'bg-white border-slate-200 opacity-80 cursor-pointer'
                                       : 'bg-white border-red-100 hover:border-red-300'
                                  }`}
                                >
                                   {isBlocked && (
-                                     <div className="absolute top-4 right-4 bg-slate-900 text-white p-1 rounded-lg" title="Título bloqueado em outro acordo ativo">
+                                     <div className="absolute top-4 right-4 bg-slate-900 text-white p-1 rounded-lg" title="Título bloqueado">
                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" strokeWidth="3"/></svg>
                                      </div>
                                   )}
@@ -501,8 +587,10 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
                                   </div>
                                   <div className="flex justify-between items-end border-t border-slate-200/50 pt-3">
                                      <p className="font-black text-slate-900 text-sm italic">R$ {(t.valor_documento || t.saldo).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
-                                     {isBlocked ? (
-                                        <span className="text-[7px] font-black text-slate-400 uppercase italic">VINCULADO AO ACORDO #{t.id_acordo}</span>
+                                     {t.statusCobranca === 'CARTORIO' ? (
+                                        <span className="text-[7px] font-black text-white bg-slate-900 px-2 py-0.5 rounded uppercase italic">EM CARTÓRIO</span>
+                                     ) : isBlocked ? (
+                                        <span className="text-[7px] font-black text-slate-400 uppercase italic">BLOQUEADO</span>
                                      ) : (
                                         <p className="text-[8px] font-black text-slate-400 uppercase italic">{t.data_vencimento?.split('-').reverse().join('/')}</p>
                                      )}
@@ -523,11 +611,11 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
                        {clientHistory.length > 0 ? clientHistory.map((h, idx) => (
                          <div key={h.id} className="relative group">
                             {idx !== clientHistory.length - 1 && <div className="absolute left-[-21px] top-6 w-0.5 h-20 bg-slate-100"></div>}
-                            <div className="absolute left-[-26px] top-1.5 w-3 h-3 rounded-full bg-blue-600 border-4 border-white shadow-sm"></div>
+                            <div className={`absolute left-[-26px] top-1.5 w-3 h-3 rounded-full border-4 border-white shadow-sm ${h.acao_tomada === 'CARTORIO' ? 'bg-slate-900' : 'bg-blue-600'}`}></div>
                             <div className="space-y-1">
                                <div className="flex items-center gap-3">
                                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{new Date(h.data_registro).toLocaleString('pt-BR')}</span>
-                                  <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase border shadow-sm ${h.acao_tomada === 'ACORDO' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>{h.acao_tomada}</span>
+                                  <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase border shadow-sm ${h.acao_tomada === 'ACORDO' ? 'bg-purple-50 text-purple-600' : h.acao_tomada === 'CARTORIO' ? 'bg-slate-900 text-white border-slate-900' : 'bg-blue-50 text-blue-600'}`}>{h.acao_tomada}</span>
                                </div>
                                <p className="text-[12px] font-bold text-slate-700 leading-relaxed group-hover:text-slate-900 transition-colors">"{h.observacao}"</p>
                                <p className="text-[8px] font-black text-slate-400 uppercase italic">Operador: {h.usuario}</p>
@@ -578,22 +666,54 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
                          Revisar Condições →
                        </button>
                     </div>
+                 ) : isNotarySelection ? (
+                    <div className="bg-slate-900 p-8 rounded-[3rem] shadow-2xl text-white space-y-6 sticky top-24">
+                        <div className="flex justify-between items-center border-b border-white/10 pb-4 mb-4">
+                           <h3 className="text-lg font-black uppercase italic tracking-tighter text-white">Enviar para Cartório</h3>
+                           <button onClick={() => { setIsNotarySelection(false); setSelectedForAgreement([]); }} className="text-[9px] font-black text-red-400 uppercase hover:underline">Cancelar</button>
+                        </div>
+                        <div className="p-6 bg-white/5 rounded-3xl border border-white/10 text-center">
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Selecionado</p>
+                          <h4 className="text-4xl font-black italic tracking-tighter text-white">R$ {totalSelectedForAgreement.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h4>
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-2">{selectedForAgreement.length} Títulos</p>
+                       </div>
+                       <button 
+                         onClick={handleSendToCartorio} 
+                         disabled={selectedForAgreement.length === 0 || isSubmittingInteraction} 
+                         className="w-full py-5 bg-white text-slate-900 rounded-[1.5rem] font-black text-[11px] uppercase tracking-widest shadow-xl hover:bg-slate-200 disabled:opacity-30 transition-all italic"
+                       >
+                         {isSubmittingInteraction ? 'Processando...' : 'Confirmar Envio'}
+                       </button>
+                    </div>
                  ) : (
-                    <form onSubmit={handleAddInteraction} className="bg-slate-900 p-8 rounded-[3rem] shadow-2xl text-white space-y-6 sticky top-24">
-                       <h3 className="text-lg font-black uppercase italic tracking-tighter text-blue-400 border-b border-white/10 pb-4 mb-4">Ocorrência CRM</h3>
-                       <div className="space-y-2">
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Canal</label>
-                          <select value={interactionForm.acao} onChange={e => setInteractionForm({...interactionForm, acao: e.target.value})} className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl outline-none font-black text-xs uppercase cursor-pointer">
-                             <option className="text-slate-900" value="WhatsApp">WhatsApp</option>
-                             <option className="text-slate-900" value="Ligação">Ligação</option>
-                          </select>
+                    <div className="bg-slate-900 p-8 rounded-[3rem] shadow-2xl text-white space-y-6 sticky top-24">
+                       <h3 className="text-lg font-black uppercase italic tracking-tighter text-blue-400 border-b border-white/10 pb-4 mb-4">Ações Rápidas CRM</h3>
+                       
+                       <div className="grid grid-cols-2 gap-3">
+                          <button onClick={() => handleQuickAction('AGENDAR')} className="p-4 bg-blue-600 hover:bg-blue-500 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all text-center">
+                             Agendar Pagamento
+                          </button>
+                          <button onClick={() => handleQuickAction('RETORNOU')} className="p-4 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all text-center">
+                             Cliente Retornou
+                          </button>
+                          <button onClick={() => handleQuickAction('SEM_RETORNO')} className="p-4 bg-amber-600 hover:bg-amber-500 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all text-center">
+                             Sem Retorno
+                          </button>
+                          <button onClick={() => handleQuickAction('CARTORIO')} className="p-4 bg-white text-slate-900 hover:bg-slate-200 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all text-center shadow-lg">
+                             Enviar p/ Cartório
+                          </button>
                        </div>
-                       <div className="space-y-2">
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Relato</label>
-                          <textarea required placeholder="RESUMO..." value={interactionForm.observacao} onChange={e => setInteractionForm({...interactionForm, observacao: e.target.value.toUpperCase()})} className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl outline-none font-medium text-xs uppercase h-24 resize-none" />
-                       </div>
-                       <button type="submit" disabled={isSubmittingInteraction} className="w-full py-5 bg-blue-600 text-white rounded-[1.5rem] font-black text-[11px] uppercase tracking-widest shadow-xl italic">Registrar Ocorrência</button>
-                    </form>
+
+                       <div className="h-px bg-white/10 my-2"></div>
+
+                       <form onSubmit={handleAddInteraction} className="space-y-4">
+                          <div className="space-y-2">
+                             <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Detalhes da Ocorrência</label>
+                             <textarea required placeholder="RESUMO..." value={interactionForm.observacao} onChange={e => setInteractionForm({...interactionForm, observacao: e.target.value.toUpperCase()})} className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl outline-none font-medium text-xs uppercase h-24 resize-none" />
+                          </div>
+                          <button type="submit" disabled={isSubmittingInteraction} className="w-full py-5 bg-blue-600 text-white rounded-[1.5rem] font-black text-[11px] uppercase tracking-widest shadow-xl italic">Registrar Ocorrência</button>
+                       </form>
+                    </div>
                  )}
               </div>
            </div>
