@@ -1,0 +1,849 @@
+
+import React, { useState, useMemo, useEffect } from 'react';
+import { DataService } from '../services/dataService';
+import { FinanceService } from '../services/financeService';
+import { DebtorInfo, User, AccountsReceivable, CollectionHistory, Settlement } from '../types';
+import { ICONS } from '../constants';
+import Toast from './Toast';
+
+type MainTab = 'CARTEIRA' | 'ACORDOS';
+
+const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }) => {
+  const [activeMainTab, setActiveMainTab] = useState<MainTab>('CARTEIRA');
+  const [debtors, setDebtors] = useState<DebtorInfo[]>([]);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
+  
+  // Estados do CRM
+  const [selectedClient, setSelectedClient] = useState<string | null>(null);
+  const [clientTitles, setClientTitles] = useState<AccountsReceivable[]>([]);
+  const [clientHistory, setClientHistory] = useState<CollectionHistory[]>([]);
+  const [isSubmittingInteraction, setIsSubmittingInteraction] = useState(false);
+  
+  // Estados do Acordo (Settlement)
+  const [isNegotiating, setIsNegotiating] = useState(false);
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [selectedForAgreement, setSelectedForAgreement] = useState<string[]>([]);
+  const [viewingSettlement, setViewingSettlement] = useState<Settlement | null>(null);
+  const [settlementDetails, setSettlementDetails] = useState<{ installments: AccountsReceivable[], originals: AccountsReceivable[] } | null>(null);
+  
+  // Estado para Baixa de Parcela
+  const [liquidatingInstallment, setLiquidatingInstallment] = useState<string | null>(null);
+  const [liquidationForm, setLiquidationForm] = useState({
+    data: new Date().toISOString().split('T')[0]
+  });
+
+  const [agreementConfig, setAgreementConfig] = useState({
+    parcelas: 1,
+    frequencia: 'Mensal' as 'Semanal' | 'Quinzenal' | 'Mensal',
+    dataPrimeira: new Date().toISOString().split('T')[0],
+    valorNegociado: 0,
+    observacao: ''
+  });
+
+  const [interactionForm, setInteractionForm] = useState({
+    acao: 'WhatsApp',
+    observacao: '',
+    proximaAcao: ''
+  });
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [debtorData, settlementData] = await Promise.all([
+        DataService.getDebtorsSummary(),
+        FinanceService.getSettlements()
+      ]);
+      setDebtors(debtorData);
+      setSettlements(settlementData);
+    } catch (e) {
+      setToast({ msg: 'Erro ao carregar dados financeiros.', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  const handleManageClient = async (cliente: string) => {
+    setSelectedClient(cliente);
+    setLoading(true);
+    try {
+      const allAR = await FinanceService.getAccountsReceivable();
+      const clientHistoryData = await FinanceService.getCollectionHistoryByClient(cliente);
+      
+      const filtered = allAR.filter(t => 
+        t.cliente === cliente && 
+        (
+          (t.saldo > 0.01 && !t.id_acordo && (t.forma_pagamento?.toUpperCase().includes('BOLETO') || t.statusCobranca !== 'NAO_COBRAVEL')) ||
+          (t.statusCobranca === 'BLOQUEADO_ACORDO')
+        )
+      );
+      
+      setClientTitles(filtered);
+      setClientHistory(clientHistoryData);
+    } catch (e) {
+      setToast({ msg: 'Erro ao carregar dossiê do cliente.', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleViewSettlement = async (s: Settlement) => {
+    setLoading(true);
+    try {
+      const details = await FinanceService.getSettlementDetails(s.id);
+      setSettlementDetails(details);
+      setViewingSettlement(s);
+    } catch (e) {
+      setToast({ msg: 'Erro ao carregar detalhes do acordo.', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelarAcordo = async () => {
+    if (!viewingSettlement) return;
+    if (!window.confirm("Deseja CANCELAR este acordo? As parcelas serão anuladas e os títulos originais serão REABERTOS.")) return;
+    
+    setIsSubmittingInteraction(true);
+    try {
+        const success = await FinanceService.cancelSettlement(viewingSettlement.id, currentUser);
+        if (success) {
+            setToast({ msg: 'ACORDO CANCELADO COM SUCESSO!', type: 'success' });
+            setViewingSettlement(null);
+            setSettlementDetails(null);
+            // Refresh completo dos dados
+            await fetchData();
+        } else {
+            setToast({ msg: 'Falha técnica ao cancelar no banco. Verifique permissões.', type: 'error' });
+        }
+    } catch (e: any) {
+        setToast({ msg: `Erro: ${e.message || 'Falha de conexão'}`, type: 'error' });
+    } finally {
+        setIsSubmittingInteraction(false);
+    }
+  };
+
+  const handleExcluirAcordo = async () => {
+    if (!viewingSettlement) return;
+    if (!window.confirm("CUIDADO: Isso excluirá PERMANENTEMENTE o contrato do banco e restaurará os débitos originais. Continuar?")) return;
+    
+    setIsSubmittingInteraction(true);
+    try {
+        const success = await FinanceService.deleteSettlement(viewingSettlement.id, currentUser);
+        if (success) {
+            setToast({ msg: 'ACORDO EXCLUÍDO!', type: 'success' });
+            setViewingSettlement(null);
+            setSettlementDetails(null);
+            // Refresh completo dos dados
+            await fetchData();
+        } else {
+            setToast({ msg: 'Falha técnica ao excluir no banco.', type: 'error' });
+        }
+    } catch (e: any) {
+        setToast({ msg: `Erro: ${e.message || 'Falha de conexão'}`, type: 'error' });
+    } finally {
+        setIsSubmittingInteraction(false);
+    }
+  };
+
+  const handleBaixarParcela = async (id: string) => {
+    setIsSubmittingInteraction(true);
+    try {
+        const success = await FinanceService.liquidateInstallment(id, liquidationForm.data, 'PIX', currentUser);
+        if (success) {
+            setToast({ msg: 'PARCELA LIQUIDADA (VIA PIX)!', type: 'success' });
+            setLiquidatingInstallment(null);
+            const updatedDetails = await FinanceService.getSettlementDetails(viewingSettlement!.id);
+            setSettlementDetails(updatedDetails);
+        } else {
+            setToast({ msg: 'Erro ao liquidar parcela.', type: 'error' });
+        }
+    } catch (e) {
+        setToast({ msg: 'Erro de conexão.', type: 'error' });
+    } finally {
+        setIsSubmittingInteraction(false);
+    }
+  };
+
+  const handleFinalizarAcordoTotal = async () => {
+    if (!viewingSettlement) return;
+    if (!window.confirm("Todas as parcelas foram pagas. Deseja liquidar os títulos originais e finalizar o contrato?")) return;
+    
+    setIsSubmittingInteraction(true);
+    try {
+        const success = await FinanceService.finalizeSettlement(viewingSettlement.id, currentUser);
+        if (success) {
+            setToast({ msg: 'ACORDO FINALIZADO E TÍTULOS ORIGINAIS LIQUIDADOS!', type: 'success' });
+            setViewingSettlement(null);
+            setSettlementDetails(null);
+            fetchData();
+        } else {
+            setToast({ msg: 'Falha ao finalizar contrato.', type: 'error' });
+        }
+    } catch (e) {
+        setToast({ msg: 'Erro de conexão.', type: 'error' });
+    } finally {
+        setIsSubmittingInteraction(false);
+    }
+  };
+
+  const calculateDaysOverdue = (dueDateStr: string) => {
+    if (!dueDateStr) return 0;
+    const due = new Date(dueDateStr);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffTime = today.getTime() - due.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays > 0 ? diffDays : 0;
+  };
+
+  const toggleTitleSelection = (id: string) => {
+    setSelectedForAgreement(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const totalSelectedForAgreement = useMemo(() => {
+    return clientTitles
+      .filter(t => selectedForAgreement.includes(t.id))
+      .reduce((acc, curr) => acc + (curr.valor_documento || curr.saldo), 0);
+  }, [clientTitles, selectedForAgreement]);
+
+  const projectedInstallments = useMemo(() => {
+    const parts = [];
+    let dateRef = new Date(agreementConfig.dataPrimeira);
+    const valuePerPart = (agreementConfig.valorNegociado || totalSelectedForAgreement) / agreementConfig.parcelas;
+
+    for (let i = 1; i <= agreementConfig.parcelas; i++) {
+      parts.push({
+        num: i,
+        date: dateRef.toISOString().split('T')[0],
+        value: valuePerPart
+      });
+      if (agreementConfig.frequencia === 'Semanal') dateRef.setDate(dateRef.getDate() + 7);
+      else if (agreementConfig.frequencia === 'Quinzenal') dateRef.setDate(dateRef.getDate() + 15);
+      else dateRef.setMonth(dateRef.getMonth() + 1);
+    }
+    return parts;
+  }, [agreementConfig, totalSelectedForAgreement]);
+
+  const handleEfetivarAcordo = async () => {
+    if (!selectedClient) return;
+    setIsSubmittingInteraction(true);
+    try {
+        const agreementId = `AC-${Date.now().toString().slice(-6)}`;
+        const res = await FinanceService.createSettlement({
+            id: agreementId,
+            cliente: selectedClient,
+            valorOriginal: totalSelectedForAgreement,
+            valorAcordo: agreementConfig.valorNegociado || totalSelectedForAgreement,
+            parcelas: agreementConfig.parcelas,
+            frequencia: agreementConfig.frequencia,
+            dataPrimeiraParcela: agreementConfig.dataPrimeira,
+            dataCriacao: new Date().toISOString(),
+            status: 'ATIVO',
+            usuario: currentUser.name,
+            intervaloDias: 30
+        }, selectedForAgreement, currentUser);
+
+        if (res) {
+            setToast({ msg: 'ACORDO EFETIVADO! PARCELAS GERADAS.', type: 'success' });
+            await FinanceService.addCollectionHistory({
+                cliente: selectedClient,
+                acao_tomada: 'ACORDO',
+                observacao: `ACORDO FIRMADO: R$ ${totalSelectedForAgreement.toFixed(2)} EM ${agreementConfig.parcelas}X ${agreementConfig.frequencia.toUpperCase()}. TÍTULOS ORIGINAIS BLOQUEADOS.`,
+                data_proxima_acao: agreementConfig.dataPrimeira,
+                valor_devido: totalSelectedForAgreement,
+                dias_atraso: 0,
+                usuario: currentUser.name
+            });
+            
+            setIsReviewing(false);
+            setIsNegotiating(false);
+            setSelectedForAgreement([]);
+            setActiveMainTab('ACORDOS');
+            fetchData();
+            setSelectedClient(null);
+        }
+    } catch (e) {
+        setToast({ msg: 'Erro ao salvar acordo.', type: 'error' });
+    } finally {
+        setIsSubmittingInteraction(false);
+    }
+  };
+
+  const handleAddInteraction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedClient) return;
+
+    setIsSubmittingInteraction(true);
+    try {
+      const totalDevido = clientTitles.reduce((acc, curr) => acc + curr.saldo, 0);
+      const res = await FinanceService.addCollectionHistory({
+        cliente: selectedClient,
+        acao_tomada: interactionForm.acao,
+        observacao: interactionForm.observacao,
+        data_proxima_acao: interactionForm.proximaAcao,
+        valor_devido: totalDevido,
+        dias_atraso: clientTitles.length > 0 ? calculateDaysOverdue(clientTitles[0].data_vencimento) : 0, 
+        usuario: currentUser.name
+      });
+
+      if (res.success) {
+        setToast({ msg: 'Interação registrada!', type: 'success' });
+        setInteractionForm({ acao: 'WhatsApp', observacao: '', proximaAcao: '' });
+        const updatedHistory = await FinanceService.getCollectionHistoryByClient(selectedClient);
+        setClientHistory(updatedHistory);
+      } else {
+        setToast({ msg: res.error || 'Falha ao processar comando.', type: 'error' });
+      }
+    } catch (e: any) {
+      setToast({ msg: 'Erro de conexão.', type: 'error' });
+    } finally {
+      setIsSubmittingInteraction(false);
+    }
+  };
+
+  const filteredDebtors = useMemo(() => {
+    return debtors.filter(d => d.cliente.toLowerCase().includes(searchTerm.toLowerCase()));
+  }, [debtors, searchTerm]);
+
+  const activeSettlements = useMemo(() => settlements.filter(s => s.status === 'ATIVO'), [settlements]);
+  const completedSettlements = useMemo(() => settlements.filter(s => s.status !== 'ATIVO'), [settlements]);
+  
+  const allInstallmentsPaid = useMemo(() => {
+    if (!settlementDetails || settlementDetails.installments.length === 0) return false;
+    return settlementDetails.installments.every(i => i.situacao === 'PAGO');
+  }, [settlementDetails]);
+
+  if (loading && !selectedClient && !viewingSettlement) return (
+    <div className="py-20 text-center opacity-30 font-black uppercase text-xs italic animate-pulse">
+      Sincronizando Sistema de Cobrança...
+    </div>
+  );
+
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500 pb-10">
+      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+      
+      {!selectedClient && !viewingSettlement ? (
+        <>
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+            <div>
+              <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">Gestão de Cobrança</h2>
+              <div className="flex gap-4 mt-4">
+                 <button 
+                  onClick={() => setActiveMainTab('CARTEIRA')}
+                  className={`px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${activeMainTab === 'CARTEIRA' ? 'bg-slate-900 text-white shadow-lg' : 'bg-white border border-slate-200 text-slate-400 hover:text-slate-600'}`}
+                 >
+                   Carteira em Atraso
+                 </button>
+                 <button 
+                  onClick={() => setActiveMainTab('ACORDOS')}
+                  className={`px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${activeMainTab === 'ACORDOS' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white border border-slate-200 text-slate-400 hover:text-slate-600'}`}
+                 >
+                   Gestão de Acordos
+                 </button>
+              </div>
+            </div>
+            
+            <div className="bg-white p-2 rounded-2xl border border-slate-200 shadow-sm flex-1 max-w-md flex items-center">
+              <svg className="w-5 h-5 text-slate-300 ml-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" strokeWidth="3"/></svg>
+              <input 
+                type="text" 
+                placeholder="LOCALIZAR..." 
+                className="w-full px-4 py-3 bg-transparent outline-none font-black text-xs uppercase"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {activeMainTab === 'CARTEIRA' ? (
+            <div className="grid grid-cols-1 gap-4">
+              {filteredDebtors.map(d => (
+                <div key={d.cliente} className="bg-white border border-slate-100 p-6 rounded-[2rem] shadow-sm hover:border-blue-300 transition-all group flex flex-col md:flex-row justify-between items-center gap-6">
+                   <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-1">
+                         <h3 className="font-black text-slate-900 uppercase italic text-lg tracking-tight">{d.cliente}</h3>
+                         {d.vencidoMais15d > 0 && <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded-lg text-[7px] font-black uppercase tracking-widest animate-pulse border border-red-100">Risco Alto</span>}
+                      </div>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{d.qtdTitulos} Títulos em aberto</p>
+                   </div>
+                   <div className="grid grid-cols-2 md:grid-cols-3 gap-8 text-center md:text-right">
+                      <div>
+                         <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Vencido</p>
+                         <p className="text-sm font-black text-slate-900 italic">R$ {d.totalVencido.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                      </div>
+                      <button 
+                        onClick={() => handleManageClient(d.cliente)}
+                        className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg italic"
+                      >
+                        Gerenciar CRM
+                      </button>
+                   </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-12">
+               <section className="space-y-6">
+                  <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tighter flex items-center gap-3">
+                     <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                     Acordos em Vigência (Ativos)
+                  </h3>
+                  <div className="grid grid-cols-1 gap-4">
+                     {activeSettlements.filter(s => s.cliente.toLowerCase().includes(searchTerm.toLowerCase())).map(s => (
+                        <div key={s.id} className="bg-white border border-slate-100 p-8 rounded-[2.5rem] shadow-sm hover:border-blue-500 transition-all flex flex-col md:flex-row justify-between items-center gap-8">
+                           <div className="flex-1">
+                              <p className="text-[8px] font-black text-blue-600 uppercase tracking-widest mb-1">Protocolo #{s.id}</p>
+                              <h4 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">{s.cliente}</h4>
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-2 italic">Criado em: {new Date(s.dataCriacao).toLocaleDateString('pt-BR')}</p>
+                           </div>
+                           <div className="grid grid-cols-2 md:grid-cols-3 gap-10 text-center md:text-right">
+                              <div>
+                                 <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Valor Acordado</p>
+                                 <p className="text-sm font-black text-emerald-600 italic">R$ {s.valorAcordo.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                              </div>
+                              <div>
+                                 <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Parcelamento</p>
+                                 <p className="text-sm font-black text-slate-900 italic">{s.parcelas}x {s.frequencia}</p>
+                              </div>
+                              <button 
+                                onClick={() => handleViewSettlement(s)}
+                                className="px-6 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-900 hover:text-white shadow-sm transition-all italic"
+                              >
+                                Gerenciar Acordo
+                              </button>
+                           </div>
+                        </div>
+                     ))}
+                  </div>
+               </section>
+
+               <section className="space-y-6 pt-6 border-t border-slate-200">
+                  <h3 className="text-sm font-black text-slate-400 uppercase tracking-[0.3em] flex items-center gap-3">
+                     Histórico de Negociações
+                  </h3>
+                  <div className="table-container shadow-none border border-slate-100">
+                     <table className="w-full">
+                        <thead className="bg-slate-50">
+                           <tr className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                              <th className="px-6 py-4 text-left">Protocolo</th>
+                              <th className="px-6 py-4 text-left">Cliente</th>
+                              <th className="px-6 py-4 text-right">Valor</th>
+                              <th className="px-6 py-4 text-center">Status</th>
+                              <th className="px-6 py-4 text-right">Ação</th>
+                           </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                           {completedSettlements.map(s => (
+                              <tr key={s.id} className="hover:bg-slate-50/50 transition-all opacity-70 grayscale hover:grayscale-0">
+                                 <td className="px-6 py-4 text-[10px] font-black text-slate-400">#{s.id}</td>
+                                 <td className="px-6 py-4 text-[11px] font-black text-slate-800 uppercase italic">{s.cliente}</td>
+                                 <td className="px-6 py-4 text-right font-black text-slate-900 text-xs">R$ {s.valorAcordo.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</td>
+                                 <td className="px-6 py-4 text-center">
+                                    <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${s.status === 'CANCELADO' ? 'bg-red-50 text-red-500 border-red-100' : s.status === 'LIQUIDADO' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-100 text-slate-500 border-slate-100'}`}>{s.status}</span>
+                                 </td>
+                                 <td className="px-6 py-4 text-right">
+                                    <button onClick={() => handleViewSettlement(s)} className="text-[9px] font-black text-blue-600 uppercase hover:underline">Visualizar</button>
+                                 </td>
+                              </tr>
+                           ))}
+                        </tbody>
+                     </table>
+                  </div>
+               </section>
+            </div>
+          )}
+        </>
+      ) : selectedClient ? (
+        /* CRM DO CLIENTE */
+        <div className="animate-in slide-in-from-right-4 duration-500 space-y-8">
+           <div className="flex items-center justify-between">
+              <button onClick={() => { setSelectedClient(null); setIsNegotiating(false); setSelectedForAgreement([]); }} className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors font-black text-[10px] uppercase tracking-widest">
+                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" strokeWidth="3"/></svg>
+                 Voltar para Fila
+              </button>
+              <div className="flex gap-3">
+                 <button 
+                   onClick={() => setIsNegotiating(!isNegotiating)}
+                   className={`px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center gap-2 italic transition-all ${isNegotiating ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                 >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    {isNegotiating ? 'Cancelar Seleção' : 'Efetuar Acordo'}
+                 </button>
+              </div>
+           </div>
+
+           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              <div className="lg:col-span-8 space-y-8">
+                 <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden">
+                    {isNegotiating && <div className="absolute top-0 left-0 w-full h-2 bg-blue-600 animate-pulse"></div>}
+                    <h2 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter mb-8 leading-none">{selectedClient}</h2>
+                    <div className="space-y-6">
+                       <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest italic">{isNegotiating ? 'SELECIONE OS TÍTULOS PARA O ACORDO' : 'DOSSIÊ FINANCEIRO'}</p>
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {clientTitles.map(t => {
+                            const isBlocked = t.statusCobranca === 'BLOQUEADO_ACORDO';
+                            const days = calculateDaysOverdue(t.data_vencimento);
+                            const isSelected = selectedForAgreement.includes(t.id);
+                            
+                            return (
+                               <div 
+                                 key={t.id} 
+                                 onClick={() => !isBlocked && isNegotiating && toggleTitleSelection(t.id)}
+                                 className={`p-6 border rounded-[2rem] space-y-4 transition-all group relative ${
+                                    isBlocked 
+                                    ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed' 
+                                    : isNegotiating 
+                                      ? isSelected ? 'bg-blue-50 border-blue-600 cursor-pointer shadow-md' : 'bg-white border-slate-200 opacity-80 cursor-pointer'
+                                      : 'bg-slate-50 border-slate-100 hover:border-blue-200'
+                                 }`}
+                               >
+                                  {isBlocked && (
+                                     <div className="absolute top-4 right-4 bg-slate-900 text-white p-1 rounded-lg" title="Título bloqueado em outro acordo ativo">
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" strokeWidth="3"/></svg>
+                                     </div>
+                                  )}
+                                  <div className="flex justify-between items-start">
+                                     <div>
+                                        <p className="font-black text-slate-400 text-[8px] uppercase">Lançamento / Doc</p>
+                                        <p className="font-mono font-bold text-slate-800 text-[11px] tracking-tight">{t.numero_documento || t.id}</p>
+                                     </div>
+                                     <div className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase border ${days > 15 ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600'}`}>{days} Dias Atraso</div>
+                                  </div>
+                                  <div className="flex justify-between items-end border-t border-slate-200/50 pt-3">
+                                     <p className="font-black text-slate-900 text-sm italic">R$ {(t.valor_documento || t.saldo).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                                     {isBlocked ? (
+                                        <span className="text-[7px] font-black text-slate-400 uppercase italic">VINCULADO AO ACORDO #{t.id_acordo}</span>
+                                     ) : (
+                                        <p className="text-[8px] font-black text-slate-400 uppercase italic">{t.data_vencimento?.split('-').reverse().join('/')}</p>
+                                     )}
+                                  </div>
+                               </div>
+                            );
+                          })}
+                       </div>
+                    </div>
+                 </div>
+                 <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+                    <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tighter mb-8 flex items-center gap-3"><ICONS.History className="w-5 h-5 text-blue-600" />Histórico de Cobrança</h3>
+                    <div className="relative pl-8 space-y-10">
+                       {clientHistory.length > 0 ? clientHistory.map((h, idx) => (
+                         <div key={h.id} className="relative group">
+                            {idx !== clientHistory.length - 1 && <div className="absolute left-[-21px] top-6 w-0.5 h-20 bg-slate-100"></div>}
+                            <div className="absolute left-[-26px] top-1.5 w-3 h-3 rounded-full bg-blue-600 border-4 border-white shadow-sm"></div>
+                            <div className="space-y-1">
+                               <div className="flex items-center gap-3">
+                                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{new Date(h.data_registro).toLocaleString('pt-BR')}</span>
+                                  <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase border shadow-sm ${h.acao_tomada === 'ACORDO' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>{h.acao_tomada}</span>
+                               </div>
+                               <p className="text-[12px] font-bold text-slate-700 leading-relaxed group-hover:text-slate-900 transition-colors">"{h.observacao}"</p>
+                               <p className="text-[8px] font-black text-slate-400 uppercase italic">Operador: {h.usuario}</p>
+                            </div>
+                         </div>
+                       )) : <div className="py-10 text-center opacity-20 italic font-black uppercase text-[10px]">Nenhum registro anterior</div>}
+                    </div>
+                 </div>
+              </div>
+
+              <div className="lg:col-span-4 space-y-6">
+                 {isNegotiating ? (
+                    <div className="bg-slate-900 p-8 rounded-[3rem] shadow-2xl text-white space-y-6 sticky top-24">
+                       <h3 className="text-lg font-black uppercase italic tracking-tighter text-amber-400">Novo Acordo</h3>
+                       <div className="p-6 bg-white/5 rounded-3xl border border-white/10 text-center">
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Montante p/ Parcelamento</p>
+                          <h4 className="text-4xl font-black italic tracking-tighter text-white">R$ {totalSelectedForAgreement.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h4>
+                       </div>
+                       <div className="space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                             <div className="space-y-2">
+                                <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Parcelas</label>
+                                <input type="number" min="1" value={agreementConfig.parcelas} onChange={e => setAgreementConfig({...agreementConfig, parcelas: parseInt(e.target.value) || 1})} className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl font-black text-xs text-center outline-none" />
+                             </div>
+                             <div className="space-y-2">
+                                <label className="text-[9px] font-black text-slate-400 uppercase ml-2">1º Vencimento</label>
+                                <input type="date" value={agreementConfig.dataPrimeira} onChange={e => setAgreementConfig({...agreementConfig, dataPrimeira: e.target.value})} className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl font-black text-[10px] uppercase outline-none" />
+                             </div>
+                          </div>
+                          <div className="space-y-2">
+                             <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Frequência de Pagamento</label>
+                             <select 
+                               value={agreementConfig.frequencia} 
+                               onChange={e => setAgreementConfig({...agreementConfig, frequencia: e.target.value as any})} 
+                               className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl font-black text-xs uppercase outline-none cursor-pointer hover:bg-white/10 transition-all"
+                             >
+                                <option value="Mensal" className="text-slate-900">Mensal (30 dias)</option>
+                                <option value="Quinzenal" className="text-slate-900">Quinzenal (15 dias)</option>
+                                <option value="Semanal" className="text-slate-900">Semanal (7 dias)</option>
+                             </select>
+                          </div>
+                       </div>
+                       <button 
+                         onClick={() => setIsReviewing(true)} 
+                         disabled={selectedForAgreement.length === 0} 
+                         className="w-full py-5 bg-blue-600 text-white rounded-[1.5rem] font-black text-[11px] uppercase tracking-widest shadow-xl hover:bg-blue-500 disabled:opacity-30 transition-all italic"
+                       >
+                         Revisar Condições →
+                       </button>
+                    </div>
+                 ) : (
+                    <form onSubmit={handleAddInteraction} className="bg-slate-900 p-8 rounded-[3rem] shadow-2xl text-white space-y-6 sticky top-24">
+                       <h3 className="text-lg font-black uppercase italic tracking-tighter text-blue-400 border-b border-white/10 pb-4 mb-4">Ocorrência CRM</h3>
+                       <div className="space-y-2">
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Canal</label>
+                          <select value={interactionForm.acao} onChange={e => setInteractionForm({...interactionForm, acao: e.target.value})} className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl outline-none font-black text-xs uppercase cursor-pointer">
+                             <option className="text-slate-900" value="WhatsApp">WhatsApp</option>
+                             <option className="text-slate-900" value="Ligação">Ligação</option>
+                          </select>
+                       </div>
+                       <div className="space-y-2">
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Relato</label>
+                          <textarea required placeholder="RESUMO..." value={interactionForm.observacao} onChange={e => setInteractionForm({...interactionForm, observacao: e.target.value.toUpperCase()})} className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl outline-none font-medium text-xs uppercase h-24 resize-none" />
+                       </div>
+                       <button type="submit" disabled={isSubmittingInteraction} className="w-full py-5 bg-blue-600 text-white rounded-[1.5rem] font-black text-[11px] uppercase tracking-widest shadow-xl italic">Registrar Ocorrência</button>
+                    </form>
+                 )}
+              </div>
+           </div>
+        </div>
+      ) : (
+        /* VISUALIZAÇÃO E GERENCIAMENTO DE ACORDO */
+        <div className="animate-in slide-in-from-bottom-4 duration-500 space-y-8">
+           <div className="flex items-center justify-between">
+              <button onClick={() => { setViewingSettlement(null); setSettlementDetails(null); }} className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors font-black text-[10px] uppercase tracking-widest">
+                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" strokeWidth="3"/></svg>
+                 Voltar para Acordos
+              </button>
+              <div className="flex items-center gap-3">
+                 {viewingSettlement.status === 'ATIVO' && (
+                    <div className="flex gap-2">
+                       {allInstallmentsPaid && (
+                         <button 
+                            onClick={handleFinalizarAcordoTotal}
+                            disabled={isSubmittingInteraction}
+                            className="px-8 py-2 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg border border-emerald-500 animate-bounce italic"
+                         >
+                            Finalizar e Liquidar Acordo
+                         </button>
+                       )}
+                       <button 
+                         onClick={handleCancelarAcordo}
+                         disabled={isSubmittingInteraction}
+                         className="px-6 py-2 bg-amber-50 text-amber-600 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-600 hover:text-white transition-all border border-amber-100 italic"
+                       >
+                          Cancelar Acordo (Histórico)
+                       </button>
+                       <button 
+                         onClick={handleExcluirAcordo}
+                         disabled={isSubmittingInteraction}
+                         className="px-6 py-2 bg-red-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all shadow-md italic"
+                       >
+                          Excluir (Permanentemente)
+                       </button>
+                    </div>
+                 )}
+                 <span className={`px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest border ${viewingSettlement.status === 'ATIVO' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : viewingSettlement.status === 'LIQUIDADO' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                    Contrato {viewingSettlement.status}
+                 </span>
+              </div>
+           </div>
+
+           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+              <div className="lg:col-span-8 space-y-8">
+                 <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+                    <p className="text-[8px] font-black text-blue-600 uppercase tracking-widest mb-1">Contrato #{viewingSettlement.id}</p>
+                    <h2 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter mb-8 leading-none">{viewingSettlement.cliente}</h2>
+                    
+                    <div className="space-y-6">
+                       <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Cronograma de Parcelas</h4>
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {settlementDetails?.installments.map((inst, i) => (
+                             <div key={inst.id} className={`p-5 border rounded-2xl flex justify-between items-center group transition-all shadow-sm ${inst.situacao === 'PAGO' ? 'bg-slate-50 border-slate-100' : 'bg-white border-blue-100 hover:border-blue-400'}`}>
+                                <div>
+                                   <p className="text-[8px] font-black text-slate-400 uppercase">PARC {i+1}</p>
+                                   <p className="font-black text-slate-900 text-xs italic">Vencimento: {inst.data_vencimento?.split('-').reverse().join('/')}</p>
+                                   {inst.situacao === 'PAGO' && (
+                                     <p className="text-[8px] font-bold text-emerald-600 uppercase mt-1">Pago via {inst.meio_recebimento} em {inst.data_liquidacao?.split('-').reverse().join('/')}</p>
+                                   )}
+                                </div>
+                                <div className="text-right flex flex-col items-end gap-2">
+                                   <p className="font-black text-slate-900 text-xs">R$ {inst.valor_documento.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                                   {inst.situacao === 'ABERTO' && viewingSettlement.status === 'ATIVO' ? (
+                                      liquidatingInstallment === inst.id ? (
+                                        <div className="flex flex-col gap-2 items-end animate-in fade-in duration-300 bg-slate-50 p-3 rounded-xl border border-blue-100">
+                                          <div className="space-y-1">
+                                             <label className="text-[8px] font-black text-slate-400 uppercase">Data do Pagamento PIX</label>
+                                             <input 
+                                               type="date" 
+                                               value={liquidationForm.data} 
+                                               onChange={e => setLiquidationForm({...liquidationForm, data: e.target.value})}
+                                               className="w-full text-[10px] border border-blue-200 rounded p-1.5 outline-none font-bold"
+                                             />
+                                          </div>
+                                          <div className="flex gap-2">
+                                             <button onClick={() => setLiquidatingInstallment(null)} className="text-[9px] font-black text-slate-400 hover:text-slate-600 transition-colors uppercase">Cancelar</button>
+                                             <button onClick={() => handleBaixarParcela(inst.id)} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-[9px] font-black uppercase hover:bg-blue-700 shadow-sm transition-all">Baixar Agora</button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <button 
+                                          onClick={() => setLiquidatingInstallment(inst.id)}
+                                          className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-black uppercase hover:bg-blue-700 shadow-md transition-all active:scale-95 italic"
+                                        >
+                                          Baixar Parcela
+                                        </button>
+                                      )
+                                   ) : (
+                                     <span className={`text-[7px] font-black uppercase ${inst.situacao === 'PAGO' ? 'text-emerald-500' : inst.situacao === 'CANCELADO' ? 'text-red-500' : 'text-amber-500 animate-pulse'}`}>{inst.situacao}</span>
+                                   )}
+                                </div>
+                             </div>
+                          ))}
+                       </div>
+                    </div>
+                 </div>
+
+                 <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic mb-6">Títulos Originais Bloqueados</h4>
+                    <div className="space-y-3">
+                       {settlementDetails?.originals.map(orig => (
+                          <div key={orig.id} className="flex justify-between items-center p-4 bg-slate-50/50 border border-dashed border-slate-200 rounded-2xl text-[10px] font-bold text-slate-500">
+                             <div className="flex gap-4">
+                                <span className="text-blue-600">ID #{orig.id}</span>
+                                <span className="text-slate-900 uppercase">DOC: {orig.numero_documento}</span>
+                             </div>
+                             <div className="flex gap-4 items-center">
+                                <span>R$ {orig.valor_documento.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
+                                <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${orig.situacao === 'LIQUIDADO' ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white'}`}>
+                                  {orig.situacao === 'LIQUIDADO' ? 'LIQUIDADO' : 'Bloqueado'}
+                                </span>
+                             </div>
+                          </div>
+                       ))}
+                    </div>
+                 </div>
+              </div>
+
+              <div className="lg:col-span-4">
+                 <div className="bg-slate-900 p-8 rounded-[3rem] text-white space-y-8 sticky top-24 shadow-2xl">
+                    <div>
+                       <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-1">Montante Negociado</p>
+                       <h4 className="text-2xl font-black italic tracking-tighter text-white">
+                          R$ {viewingSettlement.valorAcordo.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
+                       </h4>
+                    </div>
+                    <div className="h-px bg-white/10"></div>
+                    <div className="grid grid-cols-2 gap-6">
+                       <div>
+                          <p className="text-[8px] font-black text-slate-500 uppercase mb-1">Criado em</p>
+                          <p className="text-[10px] font-bold italic">{new Date(viewingSettlement.dataCriacao).toLocaleDateString('pt-BR')}</p>
+                       </div>
+                       <div>
+                          <p className="text-[8px] font-black text-slate-500 uppercase mb-1">Frequência</p>
+                          <p className="text-[10px] font-bold italic uppercase">{viewingSettlement.frequencia}</p>
+                       </div>
+                    </div>
+                    <div className="bg-white/5 p-5 rounded-2xl border border-white/10">
+                       <p className="text-[8px] font-black text-amber-400 uppercase mb-2 italic">Histórico de Observações</p>
+                       <p className="text-[10px] font-medium leading-relaxed italic opacity-80 uppercase">"{viewingSettlement.observacao || 'SEM NOTAS ADICIONAIS'}"</p>
+                    </div>
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* --- TELA DE REVISÃO DE ACORDO (MODAL OVERLAY) --- */}
+      {isReviewing && (
+         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl z-[300] flex items-center justify-center p-6 animate-in fade-in duration-300">
+            <div className="bg-white max-w-5xl w-full rounded-[3.5rem] shadow-2xl overflow-hidden flex flex-col h-[90vh]">
+               <div className="p-10 border-b border-slate-100 flex justify-between items-center bg-slate-50/30 shrink-0">
+                  <div>
+                     <h3 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter">Revisão de Acordo</h3>
+                     <p className="text-blue-600 font-bold text-[10px] uppercase tracking-widest mt-1">Confirme as condições antes da efetivação</p>
+                  </div>
+                  <button onClick={() => setIsReviewing(false)} className="p-3 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-red-500 transition-all"><ICONS.Add className="w-6 h-6 rotate-45" /></button>
+               </div>
+
+               <div className="flex-1 overflow-auto p-10 space-y-10 custom-scrollbar">
+                  {/* Resumo Financeiro */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                     <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Devedor</p>
+                        <p className="text-xl font-black text-slate-900 uppercase italic leading-none">{selectedClient}</p>
+                     </div>
+                     <div className="bg-blue-50 p-8 rounded-[2.5rem] border border-blue-100">
+                        <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-1">Montante Original</p>
+                        <p className="text-xl font-black text-blue-700 italic leading-none">R$ {totalSelectedForAgreement.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                     </div>
+                     <div className="bg-emerald-50 p-8 rounded-[2.5rem] border border-emerald-100">
+                        <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-1">Valor Acordado</p>
+                        <p className="text-2xl font-black text-emerald-700 italic leading-none">R$ {(agreementConfig.valorNegociado || totalSelectedForAgreement).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                     {/* Projeção de Parcelas */}
+                     <div className="space-y-6">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                           <div className="w-1 h-4 bg-blue-600 rounded-full"></div>
+                           Cronograma de Pagamento ({agreementConfig.frequencia})
+                        </h4>
+                        <div className="space-y-3">
+                           {projectedInstallments.map(p => (
+                              <div key={p.num} className="flex justify-between items-center p-4 bg-slate-50/50 border border-slate-100 rounded-2xl">
+                                 <span className="text-[10px] font-black text-slate-400">PARCELA {p.num}</span>
+                                 <span className="text-[11px] font-bold text-slate-900">{p.date.split('-').reverse().join('/')}</span>
+                                 <span className="text-[12px] font-black text-emerald-600 italic">R$ {p.value.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
+                              </div>
+                           ))}
+                        </div>
+                     </div>
+
+                     {/* Títulos Bloqueados */}
+                     <div className="space-y-6">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                           <div className="w-1 h-4 bg-red-600 rounded-full"></div>
+                           Títulos Originais a Bloquear
+                        </h4>
+                        <div className="space-y-3">
+                           {clientTitles.filter(t => selectedForAgreement.includes(t.id)).map(t => (
+                              <div key={t.id} className="p-4 border border-dashed border-slate-200 rounded-2xl flex justify-between items-center opacity-70">
+                                 <div className="flex gap-3 items-center">
+                                    <span className="text-[9px] font-black text-slate-400">DOC: {t.numero_documento || t.id}</span>
+                                 </div>
+                                 <span className="text-[10px] font-bold text-slate-600">R$ {(t.valor_documento || t.saldo).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
+                              </div>
+                           ))}
+                        </div>
+                        <div className="bg-amber-50 p-6 rounded-[2rem] border border-amber-100 text-[10px] text-amber-700 font-medium leading-relaxed italic">
+                           Atenção: Ao confirmar, estes títulos originais serão marcados como "NEGOCIADO" e terão o saldo zerado para não haver cobrança duplicada.
+                        </div>
+                     </div>
+                  </div>
+               </div>
+
+               <div className="p-10 border-t border-slate-100 bg-slate-50/30 flex justify-end gap-6 shrink-0">
+                  <button onClick={() => setIsReviewing(false)} className="px-8 py-5 text-slate-500 font-black text-[11px] uppercase tracking-widest italic hover:text-slate-900 transition-colors">Voltar para Ajustar</button>
+                  <button 
+                    onClick={handleEfetivarAcordo} 
+                    disabled={isSubmittingInteraction}
+                    className="px-12 py-5 bg-emerald-600 text-white rounded-[1.5rem] font-black text-[11px] uppercase tracking-widest shadow-2xl hover:bg-emerald-500 transition-all italic active:scale-95"
+                  >
+                    {isSubmittingInteraction ? 'Processando...' : 'Confirmar e Efetivar Acordo'}
+                  </button>
+               </div>
+            </div>
+         </div>
+      )}
+    </div>
+  );
+};
+
+export default DebtorCollectionModule;
