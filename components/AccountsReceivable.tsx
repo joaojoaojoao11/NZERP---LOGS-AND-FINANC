@@ -380,7 +380,7 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
               {renderSortableHeader("Situação", "situacao", "center")}
               {renderSortableHeader("Nº Doc", "numero_documento")}
               {renderSortableHeader("Forma Pgto", "forma_pagamento")}
-              {renderSortableHeader("Cobrável", "statusCobranca", "center")}
+              {renderSortableHeader("Status Cobrança", "statusCobranca", "center")}
               {renderSortableHeader("Liquidação", "data_liquidacao", "center")}
               {renderSortableHeader("Recebido", "valor_recebido", "right")}
             </tr>
@@ -393,6 +393,30 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
               // Regras de Visualização Condicional
               const isParcelaAcordo = item.origem === 'NZERP' && !!item.id_acordo;
               const isTituloNegociado = item.situacao === 'NEGOCIADO';
+
+              // Lógica de Status de Cobrança
+              let cobrancaLabel = 'EM DIA';
+              let cobrancaStyle = 'bg-emerald-50 text-emerald-600 border-emerald-100';
+
+              if (item.statusCobranca === 'CARTORIO') {
+                  cobrancaLabel = 'EM CARTÓRIO';
+                  cobrancaStyle = 'bg-slate-900 text-white border-slate-900';
+              } else if (item.statusCobranca === 'BLOQUEADO_CARTORIO') {
+                  cobrancaLabel = 'ACORDO (CARTÓRIO)';
+                  cobrancaStyle = 'bg-slate-900 text-white border-slate-900 opacity-70';
+              } else if (item.situacao === 'NEGOCIADO' || item.id_acordo) {
+                  cobrancaLabel = 'ACORDO';
+                  cobrancaStyle = 'bg-blue-50 text-blue-600 border-blue-100';
+              } else if (isPaid) {
+                  cobrancaLabel = 'QUITADO';
+                  cobrancaStyle = 'bg-slate-100 text-slate-400 border-slate-200';
+              } else if (isOverdue) {
+                  cobrancaLabel = 'COBRANDO';
+                  cobrancaStyle = 'bg-amber-50 text-amber-600 border-amber-100';
+              } else if (item.situacao === 'CANCELADO') {
+                  cobrancaLabel = 'CANCELADO';
+                  cobrancaStyle = 'bg-red-50 text-red-400 border-red-100';
+              }
 
               return (
                 <tr key={item.id} className="group hover:bg-slate-50 transition-colors">
@@ -441,12 +465,8 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
                   <td className="px-4 py-3 border-b border-slate-100 font-bold text-[10px] text-slate-600 uppercase">{item.numero_documento}</td>
                   <td className="px-4 py-3 border-b border-slate-100 font-bold text-[10px] text-slate-500 uppercase">{item.forma_pagamento}</td>
                   <td className="px-4 py-3 border-b border-slate-100 text-center">
-                    <span className={`px-2 py-0.5 rounded text-[7px] font-black uppercase border ${
-                        item.statusCobranca === 'NAO_COBRAVEL' 
-                        ? 'bg-slate-50 text-slate-400 border-slate-200' 
-                        : 'bg-emerald-50 text-emerald-600 border-emerald-100'
-                    }`}>
-                        {item.statusCobranca === 'NAO_COBRAVEL' ? 'NÃO' : 'SIM'}
+                    <span className={`px-2 py-0.5 rounded text-[7px] font-black uppercase border ${cobrancaStyle}`}>
+                        {cobrancaLabel}
                     </span>
                   </td>
                   <td className="px-4 py-3 border-b border-slate-100 text-center text-[10px] text-slate-400 font-bold">
