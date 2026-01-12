@@ -73,13 +73,15 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
     try {
       const allAR = await FinanceService.getAccountsReceivable();
       const clientHistoryData = await FinanceService.getCollectionHistoryByClient(cliente);
+      const today = new Date().toISOString().split('T')[0];
       
+      // Filtro Rigoroso: Apenas BOLETOS VENCIDOS sem acordo ativo
       const filtered = allAR.filter(t => 
         t.cliente === cliente && 
-        (
-          (t.saldo > 0.01 && !t.id_acordo && (t.forma_pagamento?.toUpperCase().includes('BOLETO') || t.statusCobranca !== 'NAO_COBRAVEL')) ||
-          (t.statusCobranca === 'BLOQUEADO_ACORDO')
-        )
+        t.saldo > 0.01 && 
+        !t.id_acordo && // Não está em acordo
+        (t.forma_pagamento || '').toUpperCase().includes('BOLETO') && // É Boleto
+        (t.data_vencimento && t.data_vencimento < today) // Está Vencido
       );
       
       setClientTitles(filtered);
@@ -463,9 +465,9 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
                     {isNegotiating && <div className="absolute top-0 left-0 w-full h-2 bg-blue-600 animate-pulse"></div>}
                     <h2 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter mb-8 leading-none">{selectedClient}</h2>
                     <div className="space-y-6">
-                       <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest italic">{isNegotiating ? 'SELECIONE OS TÍTULOS PARA O ACORDO' : 'DOSSIÊ FINANCEIRO'}</p>
+                       <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest italic">{isNegotiating ? 'SELECIONE OS TÍTULOS PARA O ACORDO' : 'DOSSIÊ FINANCEIRO (SOMENTE BOLETOS VENCIDOS)'}</p>
                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {clientTitles.map(t => {
+                          {clientTitles.length > 0 ? clientTitles.map(t => {
                             const isBlocked = t.statusCobranca === 'BLOQUEADO_ACORDO';
                             const days = calculateDaysOverdue(t.data_vencimento);
                             const isSelected = selectedForAgreement.includes(t.id);
@@ -479,7 +481,7 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
                                     ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed' 
                                     : isNegotiating 
                                       ? isSelected ? 'bg-blue-50 border-blue-600 cursor-pointer shadow-md' : 'bg-white border-slate-200 opacity-80 cursor-pointer'
-                                      : 'bg-slate-50 border-slate-100 hover:border-blue-200'
+                                      : 'bg-white border-red-100 hover:border-red-300'
                                  }`}
                                >
                                   {isBlocked && (
@@ -492,7 +494,10 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
                                         <p className="font-black text-slate-400 text-[8px] uppercase">Lançamento / Doc</p>
                                         <p className="font-mono font-bold text-slate-800 text-[11px] tracking-tight">{t.numero_documento || t.id}</p>
                                      </div>
-                                     <div className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase border ${days > 15 ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600'}`}>{days} Dias Atraso</div>
+                                     <div className="px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-red-50 text-red-600 border-red-100 flex items-center gap-1">
+                                        <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse"></div>
+                                        VENCIDO ({days} DIAS)
+                                     </div>
                                   </div>
                                   <div className="flex justify-between items-end border-t border-slate-200/50 pt-3">
                                      <p className="font-black text-slate-900 text-sm italic">R$ {(t.valor_documento || t.saldo).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
@@ -504,7 +509,11 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
                                   </div>
                                </div>
                             );
-                          })}
+                          }) : (
+                            <div className="col-span-full py-10 text-center opacity-30 italic font-black uppercase text-[10px]">
+                               Nenhum boleto vencido encontrado para negociação.
+                            </div>
+                          )}
                        </div>
                     </div>
                  </div>

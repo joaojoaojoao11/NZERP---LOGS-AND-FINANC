@@ -14,6 +14,12 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
   
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Estados de Ordenação
+  const [sortConfig, setSortConfig] = useState<{ key: keyof AccountsReceivable; direction: 'asc' | 'desc' }>({
+    key: 'data_vencimento',
+    direction: 'desc' // Padrão: Mais recente para mais antigo
+  });
+
   // Estados de Filtros Avançados
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [filters, setFilters] = useState({
@@ -34,7 +40,12 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
     setLoading(true);
     try {
       const items = await FinanceService.getAccountsReceivable();
-      setData(items);
+      // NORMALIZAÇÃO DE DADOS: Garante que 'ABERTO' seja sempre tratado como 'EM ABERTO'
+      const normalizedItems = items.map(i => ({
+        ...i,
+        situacao: (i.situacao === 'ABERTO' ? 'EM ABERTO' : i.situacao) || 'EM ABERTO'
+      }));
+      setData(normalizedItems);
     } catch (e) {
       setToast({ msg: 'Erro ao carregar títulos.', type: 'error' });
     } finally {
@@ -79,13 +90,15 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
       // 5. Filtro de Situação
       if (filters.status !== 'TODOS') {
         const isOverdue = item.data_vencimento && new Date(item.data_vencimento) < new Date() && item.saldo > 0.01;
-        const statusItem = item.situacao || 'ABERTO';
+        
+        // Como normalizamos na entrada, item.situacao já estará correto (EM ABERTO)
+        const statusItem = item.situacao || 'EM ABERTO';
 
         if (filters.status === 'VENCIDO') {
           if (!isOverdue) return false;
-        } else if (filters.status === 'ABERTO') {
-          // Mostra apenas ABERTO que NÃO está vencido (para não duplicar lógica visual)
-          if (statusItem !== 'ABERTO' || isOverdue) return false;
+        } else if (filters.status === 'EM ABERTO') {
+          // Mostra apenas EM ABERTO que NÃO está vencido (para não duplicar lógica visual)
+          if (statusItem !== 'EM ABERTO' || isOverdue) return false;
         } else {
           // PAGO, NEGOCIADO, LIQUIDADO, etc.
           if (statusItem !== filters.status) return false;
@@ -95,6 +108,69 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
       return true;
     });
   }, [data, searchTerm, filters]);
+
+  // Lógica de Ordenação Aplicada sobre os Dados Filtrados
+  const sortedData = useMemo(() => {
+    const sorted = [...filteredData];
+    if (!sortConfig) return sorted;
+
+    return sorted.sort((a, b) => {
+      const aValue = a[sortConfig.key];
+      const bValue = b[sortConfig.key];
+
+      // Tratamento para nulos/undefined
+      if (aValue === bValue) return 0;
+      if (aValue === null || aValue === undefined) return 1;
+      if (bValue === null || bValue === undefined) return -1;
+
+      // Comparação
+      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [filteredData, sortConfig]);
+
+  const handleSort = (key: keyof AccountsReceivable) => {
+    let direction: 'asc' | 'desc' = 'desc'; // Padrão inicial ao clicar: DESC (Maior para Menor / Mais Recente)
+    
+    if (sortConfig.key === key) {
+      // Se já está ordenado por essa coluna, inverte
+      direction = sortConfig.direction === 'desc' ? 'asc' : 'desc';
+    }
+    
+    setSortConfig({ key, direction });
+  };
+
+  const SortButton = ({ column }: { column: keyof AccountsReceivable }) => {
+    const isActive = sortConfig.key === column;
+    return (
+      <button 
+        type="button"
+        className={`ml-2 p-1 rounded-md transition-all flex items-center justify-center w-5 h-5 ${
+          isActive 
+            ? 'bg-blue-600 text-white shadow-sm' 
+            : 'bg-slate-800 text-slate-500 hover:bg-slate-700 hover:text-white'
+        }`}
+        title="Ordenar Maior/Menor"
+      >
+        <span className="text-[9px] leading-none">
+          {isActive ? (sortConfig.direction === 'asc' ? '▲' : '▼') : '⇅'}
+        </span>
+      </button>
+    );
+  };
+
+  const renderSortableHeader = (label: string, key: keyof AccountsReceivable, align: 'left' | 'center' | 'right' = 'left', extraClasses = '') => (
+    <th 
+      className={`bg-slate-900 text-slate-400 px-4 py-5 text-[9px] font-black uppercase border-b border-slate-800 cursor-pointer hover:text-white transition-colors group select-none text-${align} ${extraClasses}`}
+      onClick={() => handleSort(key)}
+    >
+      <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
+        <span>{label}</span>
+        <SortButton column={key} />
+      </div>
+    </th>
+  );
 
   const downloadTemplate = () => {
     const headers = [
@@ -148,6 +224,10 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
                     return parseFloat(String(val).replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0;
                 };
 
+                // Padronização na importação: Default EM ABERTO
+                let rawSituacao = String(getVal('situacao') || 'EM ABERTO').toUpperCase();
+                if (rawSituacao === 'ABERTO') rawSituacao = 'EM ABERTO';
+
                 return {
                     id: String(getVal('id') || `IMP-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`),
                     cliente: String(getVal('cliente') || '').toUpperCase(),
@@ -155,7 +235,7 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
                     data_vencimento: parseDate(getVal('vencimento')),
                     valor_documento: parseNum(getVal('valor_doc') || getVal('valor')),
                     saldo: parseNum(getVal('saldo')),
-                    situacao: String(getVal('situacao') || 'ABERTO').toUpperCase(),
+                    situacao: rawSituacao,
                     numero_documento: String(getVal('numero') || getVal('doc') || ''),
                     categoria: String(getVal('categoria') || '').toUpperCase(),
                     historico: String(getVal('historico') || ''),
@@ -205,7 +285,7 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
   };
 
   const exportExcel = () => {
-    const ws = XLSX.utils.json_to_sheet(filteredData.map(d => ({
+    const ws = XLSX.utils.json_to_sheet(sortedData.map(d => ({
         ID: d.id,
         ID_Acordo: d.id_acordo,
         Origem: d.origem,
@@ -290,31 +370,28 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
         <table className="w-full border-separate border-spacing-0" style={{ minWidth: '1600px' }}>
           <thead>
             <tr>
-              <th className="bg-slate-900 text-slate-400 px-6 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-left sticky left-0 z-40 w-32">ID LANÇAMENTO</th>
-              <th className="bg-slate-900 text-slate-400 px-6 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-left">ID ACORDO</th>
-              <th className="bg-slate-900 text-slate-400 px-6 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-left">Origem</th>
-              <th className="bg-slate-900 text-slate-400 px-6 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-left">Cliente</th>
-              <th className="bg-slate-900 text-slate-400 px-4 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-center">Vencimento</th>
-              <th className="bg-slate-900 text-slate-400 px-4 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-right">Valor Doc.</th>
-              <th className="bg-slate-900 text-slate-400 px-4 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-right">Saldo</th>
-              <th className="bg-slate-900 text-slate-400 px-4 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-center">Situação</th>
-              <th className="bg-slate-900 text-slate-400 px-4 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-left">Nº Doc</th>
-              <th className="bg-slate-900 text-slate-400 px-4 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-left">Forma Pgto</th>
-              <th className="bg-slate-900 text-slate-400 px-4 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-center">Cobrável</th>
-              <th className="bg-slate-900 text-slate-400 px-4 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-center">Liquidação</th>
-              <th className="bg-slate-900 text-slate-400 px-4 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-right">Recebido</th>
+              {renderSortableHeader("ID LANÇAMENTO", "id", "left", "sticky left-0 z-40 w-32")}
+              {renderSortableHeader("ID ACORDO", "id_acordo")}
+              {renderSortableHeader("Origem", "origem")}
+              {renderSortableHeader("Cliente", "cliente")}
+              {renderSortableHeader("Vencimento", "data_vencimento", "center")}
+              {renderSortableHeader("Valor Doc.", "valor_documento", "right")}
+              {renderSortableHeader("Saldo", "saldo", "right")}
+              {renderSortableHeader("Situação", "situacao", "center")}
+              {renderSortableHeader("Nº Doc", "numero_documento")}
+              {renderSortableHeader("Forma Pgto", "forma_pagamento")}
+              {renderSortableHeader("Cobrável", "statusCobranca", "center")}
+              {renderSortableHeader("Liquidação", "data_liquidacao", "center")}
+              {renderSortableHeader("Recebido", "valor_recebido", "right")}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {filteredData.map(item => {
+            {sortedData.map(item => {
               const isOverdue = item.data_vencimento && new Date(item.data_vencimento) < new Date() && item.saldo > 0.01;
               const isPaid = item.saldo <= 0.01 || item.situacao === 'PAGO';
               
               // Regras de Visualização Condicional
-              // 1. Se for parcela gerada (Origem NZERP + Tem ID Acordo), oculta ID Lançamento
               const isParcelaAcordo = item.origem === 'NZERP' && !!item.id_acordo;
-              
-              // 2. Se for título negociado (Situação NEGOCIADO), oculta ID Acordo
               const isTituloNegociado = item.situacao === 'NEGOCIADO';
 
               return (
@@ -383,7 +460,7 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
             })}
           </tbody>
         </table>
-        {filteredData.length === 0 && (
+        {sortedData.length === 0 && (
             <div className="py-20 text-center opacity-30 font-black uppercase text-[10px]">Nenhum título encontrado.</div>
         )}
       </div>
@@ -441,7 +518,7 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Situação do Título</label>
                     <select value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-blue-600 rounded-xl text-xs font-bold outline-none uppercase cursor-pointer">
                        <option value="TODOS">Todas as Situações</option>
-                       <option value="ABERTO">Em Aberto (A Vencer)</option>
+                       <option value="EM ABERTO">Em Aberto (A Vencer)</option>
                        <option value="VENCIDO">Vencidos</option>
                        <option value="PAGO">Pagos / Liquidados</option>
                        <option value="NEGOCIADO">Negociados (Acordo)</option>
