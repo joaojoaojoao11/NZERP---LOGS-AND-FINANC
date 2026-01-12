@@ -14,6 +14,16 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
   
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Estados de Filtros Avançados
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [filters, setFilters] = useState({
+    startDate: '',
+    endDate: '',
+    origin: 'TODOS',
+    paymentMethod: 'TODOS',
+    status: 'TODOS'
+  });
+
   // Estados de Importação
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStaging, setImportStaging] = useState<ARStagingItem[] | null>(null);
@@ -34,16 +44,57 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
 
   useEffect(() => { fetchData(); }, []);
 
+  // Opções dinâmicas para os filtros baseadas nos dados carregados
+  const uniqueOrigins = useMemo(() => Array.from(new Set(data.map(i => i.origem || 'OUTROS'))).sort(), [data]);
+  const uniqueMethods = useMemo(() => Array.from(new Set(data.map(i => i.forma_pagamento || 'OUTROS'))).sort(), [data]);
+
   const filteredData = useMemo(() => {
     const term = searchTerm.toLowerCase();
-    return data.filter(item => 
-      (item.cliente || '').toLowerCase().includes(term) ||
-      (item.numero_documento || '').toLowerCase().includes(term) ||
-      (item.id || '').toLowerCase().includes(term) ||
-      (item.id_acordo || '').toLowerCase().includes(term) ||
-      (item.origem || '').toLowerCase().includes(term)
-    );
-  }, [data, searchTerm]);
+    
+    return data.filter(item => {
+      // 1. Filtro Textual (Busca Inteligente)
+      const matchesSearch = 
+        (item.cliente || '').toLowerCase().includes(term) ||
+        (item.numero_documento || '').toLowerCase().includes(term) ||
+        (item.id || '').toLowerCase().includes(term) ||
+        (item.id_acordo || '').toLowerCase().includes(term) ||
+        (item.origem || '').toLowerCase().includes(term);
+
+      if (!matchesSearch) return false;
+
+      // 2. Filtro de Período (Vencimento)
+      if (filters.startDate || filters.endDate) {
+        if (!item.data_vencimento) return false;
+        const itemDate = item.data_vencimento;
+        if (filters.startDate && itemDate < filters.startDate) return false;
+        if (filters.endDate && itemDate > filters.endDate) return false;
+      }
+
+      // 3. Filtro de Origem
+      if (filters.origin !== 'TODOS' && (item.origem || 'OUTROS') !== filters.origin) return false;
+
+      // 4. Filtro de Forma de Pagamento
+      if (filters.paymentMethod !== 'TODOS' && (item.forma_pagamento || 'OUTROS') !== filters.paymentMethod) return false;
+
+      // 5. Filtro de Situação
+      if (filters.status !== 'TODOS') {
+        const isOverdue = item.data_vencimento && new Date(item.data_vencimento) < new Date() && item.saldo > 0.01;
+        const statusItem = item.situacao || 'ABERTO';
+
+        if (filters.status === 'VENCIDO') {
+          if (!isOverdue) return false;
+        } else if (filters.status === 'ABERTO') {
+          // Mostra apenas ABERTO que NÃO está vencido (para não duplicar lógica visual)
+          if (statusItem !== 'ABERTO' || isOverdue) return false;
+        } else {
+          // PAGO, NEGOCIADO, LIQUIDADO, etc.
+          if (statusItem !== filters.status) return false;
+        }
+      }
+
+      return true;
+    });
+  }, [data, searchTerm, filters]);
 
   const downloadTemplate = () => {
     const headers = [
@@ -170,6 +221,20 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
     XLSX.writeFile(wb, "ContasReceber_NZERP.xlsx");
   };
 
+  // Verificações de filtro ativo para highlight do botão
+  const hasActiveFilters = filters.startDate !== '' || filters.endDate !== '' || filters.origin !== 'TODOS' || filters.paymentMethod !== 'TODOS' || filters.status !== 'TODOS';
+
+  const clearFilters = () => {
+    setFilters({
+      startDate: '',
+      endDate: '',
+      origin: 'TODOS',
+      paymentMethod: 'TODOS',
+      status: 'TODOS'
+    });
+    setShowFilterModal(false);
+  };
+
   if (loading) return <div className="p-20 text-center opacity-30 font-black uppercase text-xs italic animate-pulse">Carregando Títulos...</div>;
 
   return (
@@ -184,16 +249,26 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
           </p>
         </div>
         
-        <div className="flex gap-3">
-           <div className="bg-white p-2 rounded-2xl border border-slate-200 shadow-sm flex-1 md:w-80">
+        <div className="flex gap-3 items-center">
+           {/* Barra de Pesquisa e Filtro */}
+           <div className="flex items-center gap-2 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm flex-1 md:w-auto">
               <input 
                 type="text" 
                 placeholder="BUSCAR CLIENTE, ORIGEM OU DOC..." 
-                className="w-full px-4 py-2 bg-transparent outline-none font-bold text-xs uppercase"
+                className="w-full md:w-64 px-4 py-2 bg-transparent outline-none font-bold text-xs uppercase"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
+              <div className="h-6 w-px bg-slate-100"></div>
+              <button 
+                onClick={() => setShowFilterModal(true)}
+                className={`p-2 rounded-xl transition-all ${hasActiveFilters ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
+                title="Filtros Avançados"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>
+              </button>
            </div>
+
            <button 
              onClick={exportExcel}
              className="px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center space-x-2 italic"
@@ -312,6 +387,76 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
             <div className="py-20 text-center opacity-30 font-black uppercase text-[10px]">Nenhum título encontrado.</div>
         )}
       </div>
+
+      {/* --- MODAL DE FILTROS AVANÇADOS --- */}
+      {showFilterModal && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-md z-[200] flex items-center justify-center p-6 animate-in fade-in duration-200">
+           <div className="bg-white max-w-lg w-full rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="p-8 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
+                 <div>
+                    <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tighter">Filtros Avançados</h3>
+                    <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest mt-1">Refine sua visualização financeira</p>
+                 </div>
+                 <button onClick={() => setShowFilterModal(false)} className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-slate-900 transition-all">
+                    <ICONS.Add className="w-5 h-5 rotate-45" />
+                 </button>
+              </div>
+              
+              <div className="p-8 space-y-6">
+                 {/* Período */}
+                 <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Período de Vencimento</label>
+                    <div className="grid grid-cols-2 gap-4">
+                       <div>
+                          <p className="text-[8px] font-bold text-slate-400 mb-1">DE</p>
+                          <input type="date" value={filters.startDate} onChange={e => setFilters({...filters, startDate: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-blue-600 rounded-xl text-xs font-bold outline-none uppercase" />
+                       </div>
+                       <div>
+                          <p className="text-[8px] font-bold text-slate-400 mb-1">ATÉ</p>
+                          <input type="date" value={filters.endDate} onChange={e => setFilters({...filters, endDate: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-blue-600 rounded-xl text-xs font-bold outline-none uppercase" />
+                       </div>
+                    </div>
+                 </div>
+
+                 {/* Origem */}
+                 <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Origem do Lançamento</label>
+                    <select value={filters.origin} onChange={e => setFilters({...filters, origin: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-blue-600 rounded-xl text-xs font-bold outline-none uppercase cursor-pointer">
+                       <option value="TODOS">Todas as Origens</option>
+                       {uniqueOrigins.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                 </div>
+
+                 {/* Forma Pagamento */}
+                 <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Forma de Pagamento</label>
+                    <select value={filters.paymentMethod} onChange={e => setFilters({...filters, paymentMethod: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-blue-600 rounded-xl text-xs font-bold outline-none uppercase cursor-pointer">
+                       <option value="TODOS">Todas as Formas</option>
+                       {uniqueMethods.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                 </div>
+
+                 {/* Situação */}
+                 <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Situação do Título</label>
+                    <select value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-blue-600 rounded-xl text-xs font-bold outline-none uppercase cursor-pointer">
+                       <option value="TODOS">Todas as Situações</option>
+                       <option value="ABERTO">Em Aberto (A Vencer)</option>
+                       <option value="VENCIDO">Vencidos</option>
+                       <option value="PAGO">Pagos / Liquidados</option>
+                       <option value="NEGOCIADO">Negociados (Acordo)</option>
+                       <option value="CANCELADO">Cancelados</option>
+                    </select>
+                 </div>
+              </div>
+
+              <div className="p-8 border-t border-slate-100 bg-slate-50/30 flex gap-4">
+                 <button onClick={clearFilters} className="flex-1 py-4 bg-white border border-slate-200 text-slate-500 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:text-red-500 transition-all">Limpar Filtros</button>
+                 <button onClick={() => setShowFilterModal(false)} className="flex-[2] py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl hover:bg-blue-600 transition-all">Aplicar Filtros</button>
+              </div>
+           </div>
+        </div>
+      )}
 
       {/* --- MODAL DE IMPORTAÇÃO --- */}
       {showImportModal && (
