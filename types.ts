@@ -13,7 +13,8 @@ export type ViewType =
   | 'GESTAO_USUARIOS' 
   | 'LANCAMENTO_RECEBER'
   | 'INADIMPLENCIA' 
-  | 'CONTAS_PAGAR' // Nova View
+  | 'CONTAS_PAGAR'
+  | 'BI_CAIXA' // Novo Módulo
   | 'CONFIGURACOES'
   | 'MOVEMENTS_LIST';
 
