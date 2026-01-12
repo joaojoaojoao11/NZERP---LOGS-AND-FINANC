@@ -288,9 +288,9 @@ const AccountsReceivableModule: React.FC<{ currentUser: User }> = ({ currentUser
 
       <div className="table-container flex-1 overflow-auto border border-slate-200 rounded-[2rem] bg-white shadow-sm" style={{ maxHeight: 'calc(100vh - 220px)' }}>
         <table className="w-full border-separate border-spacing-0" style={{ minWidth: '1600px' }}>
-          <thead className="sticky top-0 z-20">
+          <thead>
             <tr>
-              <th className="bg-slate-900 text-slate-400 px-6 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-left sticky left-0 z-30 w-32">ID LANÇAMENTO</th>
+              <th className="bg-slate-900 text-slate-400 px-6 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-left sticky left-0 z-40 w-32">ID LANÇAMENTO</th>
               <th className="bg-slate-900 text-slate-400 px-6 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-left">ID ACORDO</th>
               <th className="bg-slate-900 text-slate-400 px-6 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-left">Origem</th>
               <th className="bg-slate-900 text-slate-400 px-6 py-5 text-[9px] font-black uppercase border-b border-slate-800 text-left">Cliente</th>

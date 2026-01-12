@@ -104,29 +104,6 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
     }
   };
 
-  const handleCancelarAcordo = async () => {
-    if (!viewingSettlement) return;
-    if (!window.confirm("Deseja CANCELAR este acordo? As parcelas serão anuladas e os títulos originais serão REABERTOS.")) return;
-    
-    setIsSubmittingInteraction(true);
-    try {
-        const success = await FinanceService.cancelSettlement(viewingSettlement.id, currentUser);
-        if (success) {
-            setToast({ msg: 'ACORDO CANCELADO COM SUCESSO!', type: 'success' });
-            setViewingSettlement(null);
-            setSettlementDetails(null);
-            // Refresh completo dos dados
-            await fetchData();
-        } else {
-            setToast({ msg: 'Falha técnica ao cancelar no banco. Verifique permissões.', type: 'error' });
-        }
-    } catch (e: any) {
-        setToast({ msg: `Erro: ${e.message || 'Falha de conexão'}`, type: 'error' });
-    } finally {
-        setIsSubmittingInteraction(false);
-    }
-  };
-
   const handleExcluirAcordo = async () => {
     if (!viewingSettlement) return;
     if (!window.confirm("CUIDADO: Isso excluirá PERMANENTEMENTE o contrato do banco e restaurará os débitos originais. Continuar?")) return;
@@ -632,13 +609,6 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
                             Finalizar e Liquidar Acordo
                          </button>
                        )}
-                       <button 
-                         onClick={handleCancelarAcordo}
-                         disabled={isSubmittingInteraction}
-                         className="px-6 py-2 bg-amber-50 text-amber-600 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-600 hover:text-white transition-all border border-amber-100 italic"
-                       >
-                          Cancelar Acordo (Histórico)
-                       </button>
                        <button 
                          onClick={handleExcluirAcordo}
                          disabled={isSubmittingInteraction}
