@@ -16,7 +16,9 @@ const SYSTEM_FEATURES = [
   { id: 'HISTORICO_HUB', label: 'Timeline & Auditoria', group: 'LOGÍSTICA' },
   { id: 'LANCAMENTO_RECEBER', label: 'Contas a Receber', group: 'FINANCEIRO' },
   { id: 'INADIMPLENCIA', label: 'Inadimplência', group: 'FINANCEIRO' },
-  { id: 'CONTAS_PAGAR', label: 'Contas a Pagar', group: 'FINANCEIRO' }, // Novo Item
+  { id: 'CONTAS_PAGAR', label: 'Contas a Pagar', group: 'FINANCEIRO' },
+  { id: 'BI_CAIXA', label: 'Fluxo de Caixa (BI)', group: 'FINANCEIRO' }, // Adicionado
+  { id: 'BI_DESPESAS', label: 'Análise de Despesas (BI)', group: 'FINANCEIRO' }, // Adicionado
   { id: 'GESTAO_USUARIOS', label: 'Administrar Usuários', group: 'SISTEMA' },
   { id: 'CONFIGURACOES', label: 'Parâmetros Globais', group: 'SISTEMA' },
   { id: 'CAN_EDIT', label: 'Permitir Edição Cadastral', group: 'AÇÕES' },
@@ -24,7 +26,7 @@ const SYSTEM_FEATURES = [
 
 const DEFAULT_PERMISSIONS: Record<UserRole, string[]> = {
   'ESTOQUISTA': ['INVENTARIO', 'CONFERENCIA_INVENTARIO', 'SAIDA', 'ENTRADA', 'CATALOGO_MESTRE'],
-  'ADM': ['INVENTARIO', 'CONFERENCIA_INVENTARIO', 'HISTORICO_INVENTARIO', 'SAIDA', 'ENTRADA', 'CATALOGO_MESTRE', 'HISTORICO_HUB', 'LANCAMENTO_RECEBER', 'INADIMPLENCIA', 'CONTAS_PAGAR', 'GESTAO_USUARIOS', 'CAN_EDIT'],
+  'ADM': ['INVENTARIO', 'CONFERENCIA_INVENTARIO', 'HISTORICO_INVENTARIO', 'SAIDA', 'ENTRADA', 'CATALOGO_MESTRE', 'HISTORICO_HUB', 'LANCAMENTO_RECEBER', 'INADIMPLENCIA', 'CONTAS_PAGAR', 'BI_CAIXA', 'BI_DESPESAS', 'GESTAO_USUARIOS', 'CAN_EDIT'],
   'DIRETORIA': SYSTEM_FEATURES.map(f => f.id)
 };
 
