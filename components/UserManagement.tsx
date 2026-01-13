@@ -9,6 +9,7 @@ const SYSTEM_FEATURES = [
   { id: 'INVENTARIO', label: 'Estoque / Pátio', group: 'LOGÍSTICA' },
   { id: 'CONFERENCIA_INVENTARIO', label: 'Executar Auditoria', group: 'LOGÍSTICA' },
   // { id: 'HISTORICO_INVENTARIO', label: 'Relatórios Inventário', group: 'LOGÍSTICA' }, // Removido
+  { id: 'CATALOGO_MESTRE', label: 'Catálogo Mestre', group: 'LOGÍSTICA' }, // Adicionado
   { id: 'SAIDA', label: 'Registrar Saídas', group: 'LOGÍSTICA' },
   { id: 'ENTRADA', label: 'Registrar Entradas', group: 'LOGÍSTICA' },
   // { id: 'MAPA_FISICO', label: 'Mapa do Pátio', group: 'LOGÍSTICA' }, // Removido
@@ -22,8 +23,8 @@ const SYSTEM_FEATURES = [
 ];
 
 const DEFAULT_PERMISSIONS: Record<UserRole, string[]> = {
-  'ESTOQUISTA': ['INVENTARIO', 'CONFERENCIA_INVENTARIO', 'SAIDA', 'ENTRADA'],
-  'ADM': ['INVENTARIO', 'CONFERENCIA_INVENTARIO', 'HISTORICO_INVENTARIO', 'SAIDA', 'ENTRADA', 'HISTORICO_HUB', 'LANCAMENTO_RECEBER', 'INADIMPLENCIA', 'CONTAS_PAGAR', 'GESTAO_USUARIOS', 'CAN_EDIT'],
+  'ESTOQUISTA': ['INVENTARIO', 'CONFERENCIA_INVENTARIO', 'SAIDA', 'ENTRADA', 'CATALOGO_MESTRE'],
+  'ADM': ['INVENTARIO', 'CONFERENCIA_INVENTARIO', 'HISTORICO_INVENTARIO', 'SAIDA', 'ENTRADA', 'CATALOGO_MESTRE', 'HISTORICO_HUB', 'LANCAMENTO_RECEBER', 'INADIMPLENCIA', 'CONTAS_PAGAR', 'GESTAO_USUARIOS', 'CAN_EDIT'],
   'DIRETORIA': SYSTEM_FEATURES.map(f => f.id)
 };
 
