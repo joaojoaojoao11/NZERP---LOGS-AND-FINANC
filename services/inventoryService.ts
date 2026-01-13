@@ -208,8 +208,8 @@ export class InventoryService {
   }
 
   static async getNextLPN(): Promise<string> {
-    // Generate random NZ-XXXX (4 digits)
-    return `NZ-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+    // FIX: Aumentado para 8 digitos baseados em Timestamp para garantir unicidade
+    return `NZ-${Date.now().toString().slice(-8)}`;
   }
 
   static async processInboundBatchAtomic(items: StockItem[], user: User): Promise<{ success: boolean; message?: string; lpnsGenerated?: string[] }> {
@@ -217,10 +217,11 @@ export class InventoryService {
       const lpns: string[] = [];
 
       const dbItems = items.map((it) => {
-        // Use existing LPN if present and not 'PROJETADO', otherwise generate random
+        // Use existing LPN if present and not 'PROJETADO', otherwise generate robust
         let lpn = it.lpn;
         if (!lpn || lpn === 'PROJETADO' || lpn.length < 5) {
-             lpn = `NZ-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+             // Fallback de alta entropia: Timestamp (6) + Random (3)
+             lpn = `NZ-${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
         }
         
         lpns.push(lpn);

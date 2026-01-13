@@ -5,6 +5,7 @@ import { FinanceService } from '../services/financeService';
 import { DebtorInfo, User, AccountsReceivable, CollectionHistory, Settlement } from '../types';
 import { ICONS } from '../constants';
 import Toast from './Toast';
+import { jsPDF } from 'jspdf';
 
 type MainTab = 'CARTEIRA' | 'ACORDOS' | 'LOGS';
 
@@ -98,6 +99,7 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
     }
   };
 
+  // ... (Funções de cartório mantidas iguais) ...
   const handleSendToCartorio = async () => {
     if (selectedForAgreement.length === 0) return;
     if (!window.confirm(`Confirma o envio de ${selectedForAgreement.length} títulos para protesto em cartório?`)) return;
@@ -119,7 +121,7 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
         setIsNotarySelection(false);
         setSelectedForAgreement([]);
         fetchData();
-        setSelectedClient(null); // Volta pra lista para ver atualização
+        setSelectedClient(null); 
       } else {
         setToast({ msg: res.message || 'Erro ao processar envio.', type: 'error' });
       }
@@ -163,7 +165,6 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
   };
 
   const handleQuickAction = (actionType: 'AGENDAR' | 'RETORNOU' | 'SEM_RETORNO' | 'CARTORIO' | 'RETIRAR_CARTORIO') => {
-    // Reset selection modes
     setIsNegotiating(false);
     setIsNotarySelection(false);
     setIsNotaryRemoval(false);
@@ -222,7 +223,6 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
             setToast({ msg: 'ACORDO EXCLUÍDO!', type: 'success' });
             setViewingSettlement(null);
             setSettlementDetails(null);
-            // Refresh completo dos dados
             await fetchData();
         } else {
             setToast({ msg: 'Falha técnica ao excluir no banco.', type: 'error' });
@@ -315,6 +315,127 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
     return parts;
   }, [agreementConfig, totalSelectedForAgreement]);
 
+  // Função para gerar o PDF do Acordo
+  const generateAgreementPDF = async (
+    agreementId: string,
+    clientName: string,
+    originalTotal: number,
+    agreedTotal: number,
+    parcelas: number,
+    frequencia: string,
+    firstDate: string,
+    titles: AccountsReceivable[]
+  ) => {
+    try {
+      const doc = new jsPDF();
+      const company = await DataService.getCompanySettings();
+      const today = new Date().toLocaleDateString('pt-BR');
+
+      // Título
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text('TERMO DE CONFISSÃO DE DÍVIDA E ACORDO EXTRAJUDICIAL', 105, 20, { align: 'center' });
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`PROTOCOLO: ${agreementId} | DATA: ${today}`, 105, 28, { align: 'center' });
+
+      // Dados das Partes
+      let y = 40;
+      doc.setFont('helvetica', 'bold');
+      doc.text('CREDOR:', 20, y);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${company.name || 'NZERP - SISTEMA DE GESTÃO'} (CNPJ: ${company.cnpj || '---'})`, 50, y);
+      
+      y += 8;
+      doc.setFont('helvetica', 'bold');
+      doc.text('DEVEDOR:', 20, y);
+      doc.setFont('helvetica', 'normal');
+      doc.text(clientName, 50, y);
+
+      // Objeto (Dívida Original)
+      y += 15;
+      doc.setFont('helvetica', 'bold');
+      doc.text('1. DO OBJETO (DÍVIDA ORIGINAL):', 20, y);
+      y += 6;
+      doc.setFont('helvetica', 'normal');
+      const debtText = `O DEVEDOR reconhece e confessa a dívida no valor total original de R$ ${originalTotal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}, referente aos seguintes títulos vencidos:`;
+      const splitDebt = doc.splitTextToSize(debtText, 170);
+      doc.text(splitDebt, 20, y);
+      
+      y += 6 * splitDebt.length;
+      
+      // Lista de Títulos (Resumida)
+      doc.setFontSize(8);
+      titles.forEach((t, i) => {
+        if (y > 270) { doc.addPage(); y = 20; }
+        doc.text(`• Doc: ${t.numero_documento || t.id} - Venc: ${new Date(t.data_vencimento).toLocaleDateString('pt-BR')} - Valor: R$ ${t.saldo.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`, 25, y);
+        y += 4;
+      });
+      y += 4;
+
+      // Condições do Acordo
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text('2. DAS CONDIÇÕES DE PAGAMENTO (ACORDO):', 20, y);
+      y += 6;
+      doc.setFont('helvetica', 'normal');
+      const agreeText = `As partes ajustam o pagamento do montante negociado de R$ ${agreedTotal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}, a ser liquidado em ${parcelas} parcela(s) de periodicidade ${frequencia.toUpperCase()}, com início em ${new Date(firstDate).toLocaleDateString('pt-BR')}, conforme cronograma abaixo:`;
+      const splitAgree = doc.splitTextToSize(agreeText, 170);
+      doc.text(splitAgree, 20, y);
+      y += 6 * splitAgree.length + 4;
+
+      // Tabela de Parcelas
+      doc.setFillColor(240, 240, 240);
+      doc.rect(20, y, 170, 8, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text('PARCELA', 25, y + 5);
+      doc.text('VENCIMENTO', 80, y + 5);
+      doc.text('VALOR', 150, y + 5);
+      y += 10;
+
+      doc.setFont('helvetica', 'normal');
+      const parts = [];
+      let dateRef = new Date(firstDate);
+      const valuePerPart = agreedTotal / parcelas;
+
+      for (let i = 1; i <= parcelas; i++) {
+        if (y > 270) { doc.addPage(); y = 20; }
+        doc.text(`${i}/${parcelas}`, 25, y);
+        doc.text(dateRef.toLocaleDateString('pt-BR'), 80, y);
+        doc.text(`R$ ${valuePerPart.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`, 150, y);
+        
+        if (frequencia === 'Semanal') dateRef.setDate(dateRef.getDate() + 7);
+        else if (frequencia === 'Quinzenal') dateRef.setDate(dateRef.getDate() + 15);
+        else dateRef.setMonth(dateRef.getMonth() + 1);
+        
+        y += 6;
+      }
+
+      // Disposições Finais
+      y += 10;
+      if (y > 250) { doc.addPage(); y = 20; }
+      doc.setFontSize(8);
+      doc.text('3. O não pagamento de qualquer parcela acarretará o vencimento antecipado das demais e o retorno da dívida ao valor original.', 20, y);
+      
+      // Assinaturas
+      y += 30;
+      if (y > 270) { doc.addPage(); y = 40; }
+      
+      doc.line(20, y, 90, y);
+      doc.line(110, y, 180, y);
+      doc.text('CREDOR (NZERP)', 35, y + 4);
+      doc.text('DEVEDOR', 135, y + 4);
+
+      doc.save(`ACORDO_${agreementId}_${clientName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
+
+    } catch (e) {
+      console.error("Erro ao gerar PDF:", e);
+      setToast({ msg: 'Erro ao gerar PDF do acordo.', type: 'error' });
+    }
+  };
+
   const handleEfetivarAcordo = async () => {
     if (!selectedClient) return;
     setIsSubmittingInteraction(true);
@@ -335,7 +456,23 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
         }, selectedForAgreement, currentUser);
 
         if (res) {
-            setToast({ msg: 'ACORDO EFETIVADO! PARCELAS GERADAS.', type: 'success' });
+            // Títulos originais para listar no PDF
+            const negotiatedTitles = clientTitles.filter(t => selectedForAgreement.includes(t.id));
+
+            // Gera o PDF
+            await generateAgreementPDF(
+                agreementId,
+                selectedClient,
+                totalSelectedForAgreement,
+                agreementConfig.valorNegociado || totalSelectedForAgreement,
+                agreementConfig.parcelas,
+                agreementConfig.frequencia,
+                agreementConfig.dataPrimeira,
+                negotiatedTitles
+            );
+
+            setToast({ msg: 'ACORDO EFETIVADO! PDF GERADO.', type: 'success' });
+            
             await FinanceService.addCollectionHistory({
                 cliente: selectedClient,
                 acao_tomada: 'ACORDO',
@@ -988,7 +1125,7 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
                           {settlementDetails?.installments.map((inst, i) => (
                              <div key={inst.id} className={`p-5 border rounded-2xl flex justify-between items-center group transition-all shadow-sm ${inst.situacao === 'PAGO' ? 'bg-slate-50 border-slate-100' : 'bg-white border-blue-100 hover:border-blue-400'}`}>
                                 <div>
-                                   <p className="text-[8px] font-black text-slate-400 uppercase">PARC {i+1}</p>
+                                   <p className="text-[10px] font-black text-slate-400 uppercase">PARC {i+1}</p>
                                    <p className="font-black text-slate-900 text-xs italic">Vencimento: {inst.data_vencimento?.split('-').reverse().join('/')}</p>
                                    {inst.situacao === 'PAGO' && (
                                      <p className="text-[8px] font-bold text-emerald-600 uppercase mt-1">Pago via {inst.meio_recebimento} em {inst.data_liquidacao?.split('-').reverse().join('/')}</p>

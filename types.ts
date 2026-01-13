@@ -14,7 +14,8 @@ export type ViewType =
   | 'LANCAMENTO_RECEBER'
   | 'INADIMPLENCIA' 
   | 'CONTAS_PAGAR'
-  | 'BI_CAIXA' // Novo Módulo
+  | 'BI_CAIXA' 
+  | 'BI_DESPESAS' // Novo Módulo
   | 'CONFIGURACOES'
   | 'MOVEMENTS_LIST';
 

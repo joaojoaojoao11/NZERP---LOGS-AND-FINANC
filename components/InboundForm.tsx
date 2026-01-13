@@ -31,8 +31,11 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const generateRandomLpn = () => {
-    // Gera NZ-XXXX com 4 dígitos aleatórios
-    return `NZ-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+    // FIX: Aumentado para Timestamp (6) + Random (3) para garantir unicidade e evitar colisão no BD
+    // Formato final ex: NZ-849201552
+    const timestamp = Date.now().toString().slice(-6);
+    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    return `NZ-${timestamp}${random}`;
   };
 
   useEffect(() => {
@@ -64,8 +67,9 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
   }, []);
 
   const downloadTemplate = () => {
-    const headers = "sku;quantMl;lote;nfControle;coluna;prateleira;nCaixa;observacao;larguraL;metragemPadrao;estoqueMinimo;statusRolo;motivoEntrada";
-    const example = "\nNZW01;15.50;LOTE-ABC;NF-1234;A;1;CX-81;OK;1.52;15;0;ROLO FECHADO;Compra";
+    // Removida coluna metragemPadrao pois vem do cadastro
+    const headers = "sku;quantMl;lote;nfControle;coluna;prateleira;nCaixa;observacao;motivoEntrada";
+    const example = "\nNZW01;15.50;LOTE-ABC;NF-1234;A;1;CX-81;OK;Compra";
     const blob = new Blob(["\ufeff" + headers + example], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -100,19 +104,24 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
       return;
     }
     
+    // Lógica Automática de Status do Rolo (Manual)
+    const qty = Number(formData.quantMl);
+    const std = Number(formData.metragemPadrao || 15);
+    const calculatedStatus = qty < std ? 'ROLO ABERTO' : 'ROLO FECHADO';
+
     const newItem: StockItem = {
       ...formData,
       lpn: generateRandomLpn(),
-      statusRolo: formData.statusRolo || 'ROLO FECHADO', 
+      statusRolo: calculatedStatus, // Aplica lógica
       nCaixa: formData.nCaixa || 'N/A',
       ultAtuali: new Date().toISOString(), 
       responsavel: user.name,
       dataEntrada: new Date().toISOString(),
-      quantMl: Number(formData.quantMl),
+      quantMl: qty,
       larguraL: Number(formData.larguraL),
       custoUnitario: Number(formData.custoUnitario || 0),
       estoqueMinimo: Number(formData.estoqueMinimo || 0),
-      metragemPadrao: Number(formData.metragemPadrao || 15),
+      metragemPadrao: std,
     };
     
     setDraftItems([newItem, ...draftItems]);
@@ -150,8 +159,9 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
         for (const line of lines.slice(1)) {
           const values = line.split(separator).map(v => v.trim());
           const item: any = { 
-            observacao: '', nCaixa: 'N/A', statusRolo: 'ROLO FECHADO', 
-            larguraL: 1.52, metragemPadrao: 15, estoqueMinimo: 0, 
+            observacao: '', nCaixa: 'N/A', 
+            // Default temporário, será recalculado abaixo
+            statusRolo: 'ROLO FECHADO', 
             motivoEntrada: INBOUND_REASONS[0], custoUnitario: 0 
           };
 
@@ -166,22 +176,39 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
             else if (h.includes('prat') || h.includes('niv')) item.prateleira = val.toUpperCase();
             else if (h.includes('caixa')) item.nCaixa = val.toUpperCase();
             else if (h.includes('obs')) item.observacao = val;
-            else if (h.includes('largura')) item.larguraL = Number(val.replace(',', '.'));
-            else if (h.includes('metragem padrao')) item.metragemPadrao = Number(val.replace(',', '.'));
-            else if (h.includes('estoque minimo')) item.estoqueMinimo = Number(val.replace(',', '.'));
-            else if (h.includes('status rolo')) item.statusRolo = val.toUpperCase();
             else if (h.includes('motivo entrada')) item.motivoEntrada = val;
+            // Campos opcionais, se vierem no CSV, sobrescrevem o mestre (mas idealmente vêm do mestre)
+            else if (h.includes('status rolo')) item.statusRolo = val.toUpperCase();
           });
 
           const master = catalog.find(p => p.sku === item.sku);
           if (item.sku && master) {
+            // FIX: Usa a nova função de LPN para evitar colisão na importação em massa
             const lpn = generateRandomLpn();
+            
+            // LÓGICA DE NEGÓCIO PRINCIPAL:
+            // 1. Pega metragem padrão do cadastro mestre
+            const stdMetragem = Number(master.metragemPadrao || 15);
+            const inputQuant = Number(item.quantMl || 0);
+            
+            // 2. Determina Status: Se quantidade entrada < padrão, é ROLO ABERTO
+            let calculatedStatus = item.statusRolo; 
+            // Se o usuário não definiu explicitamente no CSV, aplica regra automática
+            if (!headers.some(h => h.includes('status rolo'))) {
+               calculatedStatus = inputQuant < stdMetragem ? 'ROLO ABERTO' : 'ROLO FECHADO';
+            }
+
             items.push({ 
               ...master, ...item, assignedLpn: lpn, lpn: lpn,
-              ultAtuali: new Date().toISOString(), responsavel: user.name, dataEntrada: new Date().toISOString(),
-              quantMl: Number(item.quantMl || 0), larguraL: Number(item.larguraL || master.larguraL || 1.52),
-              custoUnitario: Number(master.custoUnitario || 0), estoqueMinimo: Number(item.estoqueMinimo || master.estoqueMinimo || 0),
-              metragemPadrao: Number(item.metragemPadrao || master.metragemPadrao || 15),
+              ultAtuali: new Date().toISOString(), 
+              responsavel: user.name, 
+              dataEntrada: new Date().toISOString(),
+              quantMl: inputQuant, 
+              larguraL: Number(item.larguraL || master.larguraL || 1.52),
+              custoUnitario: Number(master.custoUnitario || 0), 
+              estoqueMinimo: Number(item.estoqueMinimo || master.estoqueMinimo || 0),
+              metragemPadrao: stdMetragem,
+              statusRolo: calculatedStatus
             });
           }
         }
@@ -238,7 +265,7 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
       <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase italic leading-none">Registrar Entrada</h2>
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2 italic">Geração Automática de LPN (4 Dígitos)</p>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2 italic">Geração Automática de LPN (9 Dígitos)</p>
         </div>
         <button onClick={() => setIsImportModalOpen(true)} className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg flex items-center space-x-2 italic">
           <ICONS.Upload className="w-4 h-4" />
@@ -339,6 +366,7 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
                     <p className="text-blue-400 font-black text-[11px] uppercase tracking-tight">{it.sku}</p>
                   </div>
                   <p className="text-[9px] text-slate-300 font-bold uppercase truncate max-w-[150px] leading-tight">{it.nome}</p>
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{it.statusRolo}</p>
                 </div>
                 <button onClick={() => setDraftItems(draftItems.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-400 transition-transform hover:scale-110"><ICONS.Add className="w-6 h-6 rotate-45" /></button>
               </div>
@@ -394,7 +422,7 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
                                <th className="px-6 py-4">Material / SKU</th>
                                <th className="px-6 py-4 text-center">Localização</th>
                                <th className="px-6 py-4 text-right">Saldo (ML)</th>
-                               <th className="px-6 py-4 text-right">Lote</th>
+                               <th className="px-6 py-4 text-right">Status</th>
                             </tr>
                          </thead>
                          <tbody className="divide-y divide-slate-50 text-[11px]">
@@ -407,7 +435,11 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
                                   </td>
                                   <td className="px-6 py-4 text-center font-bold text-slate-500">COL {item.coluna}-{item.prateleira}</td>
                                   <td className="px-6 py-4 text-right font-black text-slate-900">{item.quantMl.toFixed(2)}</td>
-                                  <td className="px-6 py-4 text-right font-bold text-slate-400">{item.lote}</td>
+                                  <td className="px-6 py-4 text-right font-bold text-slate-400">
+                                     <span className={`px-2 py-0.5 rounded text-[8px] border ${item.statusRolo === 'ROLO ABERTO' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
+                                        {item.statusRolo}
+                                     </span>
+                                  </td>
                                </tr>
                             ))}
                          </tbody>

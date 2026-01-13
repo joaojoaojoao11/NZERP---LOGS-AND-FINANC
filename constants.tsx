@@ -17,7 +17,8 @@ export const SYSTEM_FEATURES: { id: ViewType | string; label: string; group: str
   { id: 'LANCAMENTO_RECEBER', label: 'Contas a Receber', group: 'FINANCEIRO' },
   { id: 'INADIMPLENCIA', label: 'Inadimplência', group: 'FINANCEIRO' },
   { id: 'CONTAS_PAGAR', label: 'Contas a Pagar', group: 'FINANCEIRO' },
-  { id: 'BI_CAIXA', label: 'Fluxo de Caixa Diário', group: 'FINANCEIRO' }, // Item Renomeado
+  { id: 'BI_CAIXA', label: 'Fluxo de Caixa Diário', group: 'FINANCEIRO' },
+  { id: 'BI_DESPESAS', label: 'BI Despesas', group: 'FINANCEIRO' }, // Novo Item
   { id: 'GESTAO_USUARIOS', label: 'Administrar Usuários', group: 'SISTEMA' },
   { id: 'CONFIGURACOES', label: 'Parâmetros Globais', group: 'SISTEMA' },
   { id: 'CAN_EDIT', label: 'Permitir Edição Cadastral', group: 'AÇÕES' },

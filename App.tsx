@@ -18,7 +18,8 @@ import HistoryHub from './components/HistoryHub';
 import MovementsList from './components/MovementsList'; 
 import AccountsReceivableForm from './components/AccountsReceivableForm'; 
 import AccountsPayableModule from './components/AccountsPayable';
-import CashFlowBI from './components/CashFlowBI'; // Importar novo componente
+import CashFlowBI from './components/CashFlowBI';
+import ExpenseBI from './components/ExpenseBI'; // Importar novo componente
 
 // Interface para o estado do Error Boundary
 interface AppErrorBoundaryState {
@@ -156,6 +157,7 @@ const App: React.FC = () => {
         case 'INADIMPLENCIA': return <AccountsReceivableForm user={currentUser} onSuccess={() => {}} mode="INADIMPLENCIA" />;
         case 'CONTAS_PAGAR': return <AccountsPayableModule currentUser={currentUser} />;
         case 'BI_CAIXA': return <CashFlowBI />;
+        case 'BI_DESPESAS': return <ExpenseBI />;
 
         // Sistema
         case 'GESTAO_USUARIOS': return <UserManagement admin={currentUser} />;
@@ -184,6 +186,7 @@ const App: React.FC = () => {
             {currentView !== 'SELECAO_MODULO' && moduleContext === 'ESTOQUE' && (
               <>
                 {hasAccess('INVENTARIO') && <button onClick={() => navigate('INVENTARIO')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'INVENTARIO' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>Estoque</button>}
+                {hasAccess('CATALOGO_MESTRE') && <button onClick={() => navigate('CATALOGO_MESTRE')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'CATALOGO_MESTRE' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>Catálogo</button>}
                 {hasAccess('ENTRADA') && <button onClick={() => navigate('ENTRADA')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'ENTRADA' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>Entrada</button>}
                 {hasAccess('SAIDA') && <button onClick={() => navigate('SAIDA')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'SAIDA' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>Saída</button>}
                 {hasAccess('MOVEMENTS_LIST') && <button onClick={() => navigate('MOVEMENTS_LIST')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'MOVEMENTS_LIST' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>Movimentações</button>}
@@ -197,6 +200,7 @@ const App: React.FC = () => {
                 {hasAccess('INADIMPLENCIA') && <button onClick={() => navigate('INADIMPLENCIA')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'INADIMPLENCIA' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>Inadimplência</button>}
                 {hasAccess('CONTAS_PAGAR') && <button onClick={() => navigate('CONTAS_PAGAR')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'CONTAS_PAGAR' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>Contas a Pagar</button>}
                 {hasAccess('BI_CAIXA') && <button onClick={() => navigate('BI_CAIXA')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'BI_CAIXA' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>BI Caixa</button>}
+                {hasAccess('BI_DESPESAS') && <button onClick={() => navigate('BI_DESPESAS')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'BI_DESPESAS' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>BI Despesas</button>}
               </>
             )}
             
