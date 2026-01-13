@@ -195,9 +195,24 @@ const CashFlowBI: React.FC = () => {
                  dataKey="day" 
                  axisLine={false} 
                  tickLine={false} 
-                 tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} 
-                 dy={10}
-                 label={{ value: 'DIAS', position: 'insideBottomRight', offset: -5, fontSize: 10, fill: '#cbd5e1' }}
+                 height={45} // Aumentado para caber duas linhas
+                 tick={({ x, y, payload }) => {
+                    const [year, month] = selectedMonth.split('-').map(Number);
+                    // O dia do payload.value é o dia do mês
+                    const date = new Date(year, month - 1, Number(payload.value));
+                    const weekDay = date.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '').toUpperCase().slice(0,3);
+                    return (
+                      <g transform={`translate(${x},${y})`}>
+                        <text x={0} y={0} dy={12} textAnchor="middle" fill="#94a3b8" fontSize={10} fontWeight={700}>
+                          {payload.value}
+                        </text>
+                        <text x={0} y={0} dy={24} textAnchor="middle" fill="#94a3b8" fontSize={7} fontWeight={700} opacity={0.7}>
+                          {weekDay}
+                        </text>
+                      </g>
+                    );
+                 }}
+                 label={{ value: 'DIAS', position: 'insideBottomRight', offset: 0, fontSize: 10, fill: '#cbd5e1' }}
                />
                <YAxis 
                  axisLine={false} 
