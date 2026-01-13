@@ -8,6 +8,7 @@ export const INBOUND_REASONS = ['Compra', 'Devolução de Cliente', 'Ajuste de I
 
 export const SYSTEM_FEATURES: { id: ViewType | string; label: string; group: string }[] = [
   { id: 'INVENTARIO', label: 'Estoque / Pátio', group: 'LOGÍSTICA' },
+  { id: 'BI_ESTOQUE', label: 'BI Estoque', group: 'LOGÍSTICA' }, // Novo Item
   { id: 'CONFERENCIA_INVENTARIO', label: 'Executar Auditoria', group: 'LOGÍSTICA' },
   { id: 'MOVEMENTS_LIST', label: 'Histórico Movimentos', group: 'LOGÍSTICA' }, 
   { id: 'SAIDA', label: 'Registrar Saídas', group: 'LOGÍSTICA' },
@@ -18,7 +19,7 @@ export const SYSTEM_FEATURES: { id: ViewType | string; label: string; group: str
   { id: 'INADIMPLENCIA', label: 'Inadimplência', group: 'FINANCEIRO' },
   { id: 'CONTAS_PAGAR', label: 'Contas a Pagar', group: 'FINANCEIRO' },
   { id: 'BI_CAIXA', label: 'Fluxo de Caixa Diário', group: 'FINANCEIRO' },
-  { id: 'BI_DESPESAS', label: 'BI Despesas', group: 'FINANCEIRO' }, // Novo Item
+  { id: 'BI_DESPESAS', label: 'BI Despesas', group: 'FINANCEIRO' }, 
   { id: 'GESTAO_USUARIOS', label: 'Administrar Usuários', group: 'SISTEMA' },
   { id: 'CONFIGURACOES', label: 'Parâmetros Globais', group: 'SISTEMA' },
   { id: 'CAN_EDIT', label: 'Permitir Edição Cadastral', group: 'AÇÕES' },

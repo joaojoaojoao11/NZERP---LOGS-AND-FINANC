@@ -1,4 +1,5 @@
 
+
 export type UserRole = 'DIRETORIA' | 'ADM' | 'ESTOQUISTA';
 export type ModuleContext = 'ESTOQUE' | 'FINANCEIRO' | null;
 
@@ -15,7 +16,8 @@ export type ViewType =
   | 'INADIMPLENCIA' 
   | 'CONTAS_PAGAR'
   | 'BI_CAIXA' 
-  | 'BI_DESPESAS' // Novo Módulo
+  | 'BI_DESPESAS'
+  | 'BI_ESTOQUE' // Novo Módulo
   | 'CONFIGURACOES'
   | 'MOVEMENTS_LIST';
 
@@ -175,7 +177,7 @@ export interface Settlement {
   frequencia: 'Semanal' | 'Quinzenal' | 'Mensal';
   dataPrimeiraParcela: string;
   dataCriacao: string;
-  status: 'ATIVO' | 'FINALIZADO';
+  status: 'ATIVO' | 'FINALIZADO' | 'LIQUIDADO' | 'CANCELADO';
   usuario: string;
   observacao?: string;
   titulosNegociados?: string[]; 

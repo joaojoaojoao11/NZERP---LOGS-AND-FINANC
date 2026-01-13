@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { DataService } from '../services/dataService';
-import { StockItem, User, WithdrawalReason, InventorySession } from '../types';
+import { StockItem, User, WithdrawalReason } from '../types';
 import { ICONS } from '../constants';
 import Toast from './Toast';
 import { jsPDF } from 'jspdf';
@@ -10,7 +10,7 @@ interface AuditInventoryFormProps {
   currentUser: User;
   onCancel: () => void;
   onSuccess: () => void;
-  filters: { columns: string[], shelves: string[] } | null;
+  filters: { column: string, shelf: string } | null;
 }
 
 const AuditInventoryForm: React.FC<AuditInventoryFormProps> = ({ currentUser, onCancel, onSuccess, filters }) => {
@@ -20,7 +20,6 @@ const AuditInventoryForm: React.FC<AuditInventoryFormProps> = ({ currentUser, on
   const [auditedValues, setAuditedValues] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
-  const [observation, setObservation] = useState('');
   const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [startTime] = useState(new Date().toISOString());
 
@@ -33,11 +32,11 @@ const AuditInventoryForm: React.FC<AuditInventoryFormProps> = ({ currentUser, on
         const filtered = data.filter(item => {
           if (item.quantMl <= 0) return false;
           
-          if (!filters || (filters.columns.length === 0 && filters.shelves.length === 0)) return true;
+          if (!filters || (!filters.column && !filters.shelf)) return true;
           
-          const matchCol = filters.columns.length === 0 || filters.columns.includes(item.coluna);
-          // Fix: Corrected typo from 'shelhes' to 'shelves'
-          const matchShelf = filters.shelves.length === 0 || filters.shelves.includes(item.prateleira);
+          // Lógica de filtro por texto livre (case insensitive includes)
+          const matchCol = !filters.column || item.coluna.toUpperCase().includes(filters.column.toUpperCase());
+          const matchShelf = !filters.shelf || item.prateleira.toUpperCase().includes(filters.shelf.toUpperCase());
           
           return matchCol && matchShelf;
         });
@@ -54,7 +53,7 @@ const AuditInventoryForm: React.FC<AuditInventoryFormProps> = ({ currentUser, on
           posAdjustments: 0,
           negAdjustments: 0
         });
-      } catch (e) {
+      } catch (e: any) {
         setToast({ msg: `Erro ao iniciar sessão: ${e.message}`, type: 'error' });
       }
     };
@@ -181,7 +180,6 @@ const AuditInventoryForm: React.FC<AuditInventoryFormProps> = ({ currentUser, on
 
         if (auditedQty !== item.quantMl) {
           const delta = item.quantMl - auditedQty;
-          // Se delta < 0, físico é maior (ajuste positivo). Se delta > 0, físico é menor (ajuste negativo).
           if (delta < 0) pos++; else neg++; 
 
           withdrawalBatchItems.push({
@@ -190,15 +188,14 @@ const AuditInventoryForm: React.FC<AuditInventoryFormProps> = ({ currentUser, on
             nome: item.nome,
             categoria: item.categoria,
             lote: item.lote,
-            quantidade: Math.abs(delta), // Sempre passa a quantidade absoluta para retirada
+            quantidade: Math.abs(delta), 
             motivo: WithdrawalReason.AUDITORIA,
             relato: `INVENTÁRIO FÍSICO. SISTEMA: ${item.quantMl} | FÍSICO: ${auditedQty}.`,
-            custoUnitario: item.custoUnitario, // Incluído para o log de saída
-            nfControle: item.nfControle, // Incluído para o log de saída
+            custoUnitario: item.custoUnitario,
+            nfControle: item.nfControle, 
             extra: { pedido: 'INVENTÁRIO', cliente: 'NZSTOK PÁTIO', vendedor: currentUser.name }
           });
         } else {
-            // Log para itens com saldo físico confirmado
             auditLogConfirmations.push({
               user: currentUser, 
               action: 'INVENTARIO_OK', 
@@ -216,7 +213,6 @@ const AuditInventoryForm: React.FC<AuditInventoryFormProps> = ({ currentUser, on
         }
       }
 
-      // Processa o lote de saídas/ajustes se houver divergências
       if (withdrawalBatchItems.length > 0) {
         const withdrawalResponse = await DataService.registerWithdrawalBatch(withdrawalBatchItems, currentUser);
         if (!withdrawalResponse.success) {
@@ -224,12 +220,10 @@ const AuditInventoryForm: React.FC<AuditInventoryFormProps> = ({ currentUser, on
         }
       }
 
-      // Registra os logs de confirmação de inventário (se houver)
       for (const logData of auditLogConfirmations) {
         await DataService.addLog(logData.user, logData.action, logData.sku, logData.lpn, logData.qty, logData.details, logData.lote, logData.name, logData.valorOperacao, logData.nfControle, logData.tipo, logData.category);
       }
 
-      // Salva a sessão de inventário
       await DataService.saveInventorySession({
         id: 'INV-' + Date.now(),
         startTime,
@@ -239,7 +233,7 @@ const AuditInventoryForm: React.FC<AuditInventoryFormProps> = ({ currentUser, on
         itemsCount: lpnsToProcess.length,
         posAdjustments: pos,
         negAdjustments: neg,
-        observation: observation || 'Inventário finalizado.',
+        observation: 'Inventário finalizado.',
         durationSeconds: secondsElapsed
       });
       
@@ -269,9 +263,9 @@ const AuditInventoryForm: React.FC<AuditInventoryFormProps> = ({ currentUser, on
           <div className="text-center md:text-left">
             <h2 className="text-2xl font-black text-white uppercase italic leading-none">Inventário de Pátio</h2>
             <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-2 italic">
-              {(!filters || (filters.columns.length === 0 && filters.shelves.length === 0)) 
+              {(!filters || (!filters.column && !filters.shelf)) 
                 ? 'Escopo: Pátio Inteiro (Físico Total)' 
-                : `Escopo Parcial: ${filters.columns.length ? `COL ${filters.columns.join(', ')}` : 'Todas Colunas'} | ${filters.shelves.length ? `NÍVEL ${filters.shelves.join(', ')}` : 'Todos Níveis'}`}
+                : `Escopo Parcial: ${filters.column ? `COL: ${filters.column} ` : ''}${filters.shelf ? `NÍV: ${filters.shelf}` : ''}`}
             </p>
           </div>
           

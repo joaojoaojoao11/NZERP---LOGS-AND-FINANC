@@ -15,7 +15,6 @@ const BatchImport: React.FC<BatchImportProps> = ({ currentUser, onSuccess }) => 
   const [fileName, setFileName] = useState<string>('');
   const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  // Fix: Adjusted summary type to align with DataService.processInboundBatch
   const [summary, setSummary] = useState<{ successCount: number, totalCount: number, errorMessages: string[] } | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -51,7 +50,14 @@ const BatchImport: React.FC<BatchImportProps> = ({ currentUser, onSuccess }) => 
         else if (header.includes('larg') || header.includes(' l ')) obj.larguraL = Number(values[i].replace(',', '.'));
         else if (header.includes('quant') || header.includes(' ml')) obj.quantMl = Number(values[i].replace(',', '.'));
         else if (header.includes('caixa') || header.includes('posi')) obj.nCaixa = values[i];
+        // Campos de Localização: Texto Livre (Sem validação)
+        else if (header.includes('coluna')) obj.coluna = values[i].toUpperCase();
+        else if (header.includes('prat') || header.includes('nivel')) obj.prateleira = values[i].toUpperCase();
       });
+      // Defaults se não vier na planilha
+      if (!obj.coluna) obj.coluna = 'GERAL';
+      if (!obj.prateleira) obj.prateleira = 'CHÃO';
+      
       return obj;
     });
   };
@@ -68,20 +74,17 @@ const BatchImport: React.FC<BatchImportProps> = ({ currentUser, onSuccess }) => 
         return;
       }
       
-      // Fix: Changed 'addProductsBatch' to 'processInboundBatch' and passed fileName
       const result = await DataService.processInboundBatch(items, currentUser, fileName);
       
       if (result.success) {
         setSummary({ successCount: items.length, totalCount: items.length, errorMessages: [] });
         setToast({ msg: `${items.length} produtos importados com sucesso!`, type: 'success' });
-        onSuccess(); // Chamada para fechar o modal ou atualizar a lista
+        onSuccess();
       } else {
-        // If the batch failed, all items are considered failed in this context
         setSummary({ successCount: 0, totalCount: items.length, errorMessages: [result.message || "Erro desconhecido ao importar lote."] });
         setToast({ msg: result.message || "Nenhum produto foi importado. Verifique os erros.", type: 'error' });
       }
     } catch (err: any) {
-      // Catch any unhandled errors during the process
       setSummary({ successCount: 0, totalCount: parseCSV(fileContent).length, errorMessages: [err.message || "Erro ao processar o arquivo. Verifique o delimitador Pipe (|)."] });
       setToast({ msg: `Erro crítico: ${err.message || "Erro ao processar o arquivo. Verifique o delimitador Pipe (|)."}`, type: 'error' });
     } finally {
@@ -129,7 +132,7 @@ const BatchImport: React.FC<BatchImportProps> = ({ currentUser, onSuccess }) => 
         <div className="mt-8 bg-blue-50 p-6 rounded-2xl">
           <h4 className="text-sm font-black text-blue-800 uppercase tracking-widest mb-3">Cabeçalhos Aceitos (Separados por | )</h4>
           <div className="bg-white/50 p-3 rounded-lg font-mono text-[10px] text-blue-900 overflow-x-auto whitespace-nowrap">
-            sku|marca|categoria|fornecedor|descricao|larguraL|quantMl|nCaixa
+            sku|marca|categoria|fornecedor|descricao|larguraL|quantMl|nCaixa|coluna|prateleira
           </div>
         </div>
 

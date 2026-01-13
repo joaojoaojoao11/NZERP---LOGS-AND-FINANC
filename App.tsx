@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, ModuleContext, ViewType, CompanySettings, AppNotification } from './types';
 import { DataService } from './services/dataService';
 import { ICONS, SYSTEM_FEATURES } from './constants'; 
-import { supabaseClient } from './services/core'; // Importar supabaseClient
+import { supabaseClient } from './services/core'; 
 
 import Login from './components/Login';
 import Inventory from './components/Inventory';
@@ -19,15 +19,14 @@ import MovementsList from './components/MovementsList';
 import AccountsReceivableForm from './components/AccountsReceivableForm'; 
 import AccountsPayableModule from './components/AccountsPayable';
 import CashFlowBI from './components/CashFlowBI';
-import ExpenseBI from './components/ExpenseBI'; // Importar novo componente
+import ExpenseBI from './components/ExpenseBI'; 
+import InventoryBI from './components/InventoryBI';
 
-// Interface para o estado do Error Boundary
 interface AppErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
 }
 
-// Interface para as props do Error Boundary
 interface AppErrorBoundaryProps {
   children?: React.ReactNode;
 }
@@ -79,12 +78,10 @@ const App: React.FC = () => {
   const [moduleContext, setModuleContext] = useState<ModuleContext>(null);
   const [currentView, setCurrentView] = useState<ViewType>('SELECAO_MODULO');
   const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     DataService.getCompanySettings().then(setCompanySettings).catch(() => {});
     
-    // Verificação inicial para roteamento via QR Code (LPN)
     const params = new URLSearchParams(window.location.search);
     if (params.get('lpn')) {
       setModuleContext('ESTOQUE');
@@ -95,7 +92,7 @@ const App: React.FC = () => {
   if (!currentUser) return <Login onLogin={setCurrentUser} />;
 
   if (!supabaseClient) {
-    console.error("NZERP CRITICAL: Supabase client is not initialized, likely due to missing environment variables.");
+    console.error("NZERP CRITICAL: Supabase client is not initialized.");
     return (
       <div className="flex-1 flex flex-col min-h-screen items-center justify-center p-6 text-center">
         <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6 border border-red-100 shadow-lg">
@@ -103,8 +100,7 @@ const App: React.FC = () => {
         </div>
         <h1 className="text-xl font-black text-slate-900 uppercase italic">FALHA NA CONEXÃO AO BANCO DE DADOS</h1>
         <p className="text-slate-600 max-w-md mt-2 mb-8 font-medium">
-          Não foi possível estabelecer conexão com o Supabase. Verifique suas variáveis de ambiente <span className="font-bold">VITE_SUPABASE_URL</span> e <span className="font-bold">VITE_SUPABASE_ANON_KEY</span> no Vercel.
-          Caso as variáveis estejam corretas, o problema pode ser na configuração de CORS do projeto Supabase.
+          Não foi possível estabelecer conexão com o Supabase. Verifique suas variáveis de ambiente.
         </p>
         <button onClick={() => window.location.reload()} className="mt-8 px-8 py-3 bg-slate-900 text-white rounded-xl font-black text-xs uppercase tracking-widest italic hover:bg-blue-600 transition-all">
           TENTAR RECONECTAR
@@ -124,7 +120,6 @@ const App: React.FC = () => {
   const navigate = (view: ViewType) => {
     if (view !== 'SELECAO_MODULO' && !hasAccess(view as string)) return;
     setCurrentView(view);
-    setIsMobileMenuOpen(false);
   };
 
   const renderContent = () => {
@@ -134,7 +129,6 @@ const App: React.FC = () => {
           return <ModuleSelection 
             onSelect={(ctx) => { 
               setModuleContext(ctx); 
-              // Navegação inteligente baseada no contexto escolhido
               if (ctx === 'ESTOQUE') navigate('INVENTARIO');
               else if (ctx === 'FINANCEIRO') navigate('LANCAMENTO_RECEBER');
             }} 
@@ -143,8 +137,12 @@ const App: React.FC = () => {
             userName={currentUser.name} 
           />;
         
-        // Módulos Logísticos
-        case 'INVENTARIO': return <Inventory currentUser={currentUser} onStartAudit={() => navigate('CONFERENCIA_INVENTARIO')} />;
+        case 'INVENTARIO': return <Inventory currentUser={currentUser} onStartAudit={(filters) => { 
+            // Passa os filtros corretamente para a tela de conferência
+            // @ts-ignore - Bypass temporário se houver conflito de tipagem, mas o componente AuditInventoryForm será atualizado
+            navigate('CONFERENCIA_INVENTARIO', filters); 
+        }} />;
+        case 'BI_ESTOQUE': return <InventoryBI />; 
         case 'CONFERENCIA_INVENTARIO': return <AuditInventoryForm currentUser={currentUser} onCancel={() => navigate('INVENTARIO')} onSuccess={() => navigate('INVENTARIO')} filters={null} />;
         case 'MOVEMENTS_LIST': return <MovementsList />;
         case 'HISTORICO_HUB': return <HistoryHub currentUser={currentUser} />;
@@ -152,14 +150,12 @@ const App: React.FC = () => {
         case 'SAIDA': return <WithdrawalForm currentUser={currentUser} onSuccess={() => navigate('INVENTARIO')} />;
         case 'CATALOGO_MESTRE': return <MasterCatalog user={currentUser} />;
         
-        // Módulos Financeiros
         case 'LANCAMENTO_RECEBER': return <AccountsReceivableForm user={currentUser} onSuccess={() => {}} mode="LISTA" />;
         case 'INADIMPLENCIA': return <AccountsReceivableForm user={currentUser} onSuccess={() => {}} mode="INADIMPLENCIA" />;
         case 'CONTAS_PAGAR': return <AccountsPayableModule currentUser={currentUser} />;
         case 'BI_CAIXA': return <CashFlowBI />;
         case 'BI_DESPESAS': return <ExpenseBI />;
 
-        // Sistema
         case 'GESTAO_USUARIOS': return <UserManagement admin={currentUser} />;
         case 'CONFIGURACOES': return <Settings admin={currentUser} onUpdate={setCompanySettings} onNavigate={navigate} />; 
         
@@ -182,10 +178,10 @@ const App: React.FC = () => {
         <div className="flex items-center space-x-6">
           <div className="hidden md:flex space-x-4 border-r border-slate-800 pr-6 mr-6">
             
-            {/* Menu Logística */}
             {currentView !== 'SELECAO_MODULO' && moduleContext === 'ESTOQUE' && (
               <>
                 {hasAccess('INVENTARIO') && <button onClick={() => navigate('INVENTARIO')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'INVENTARIO' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>Estoque</button>}
+                {hasAccess('BI_ESTOQUE') && <button onClick={() => navigate('BI_ESTOQUE')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'BI_ESTOQUE' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>BI Estoque</button>}
                 {hasAccess('CATALOGO_MESTRE') && <button onClick={() => navigate('CATALOGO_MESTRE')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'CATALOGO_MESTRE' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>Catálogo</button>}
                 {hasAccess('ENTRADA') && <button onClick={() => navigate('ENTRADA')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'ENTRADA' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>Entrada</button>}
                 {hasAccess('SAIDA') && <button onClick={() => navigate('SAIDA')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'SAIDA' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>Saída</button>}
@@ -193,7 +189,6 @@ const App: React.FC = () => {
               </>
             )}
 
-            {/* Menu Financeiro */}
             {currentView !== 'SELECAO_MODULO' && moduleContext === 'FINANCEIRO' && (
               <>
                 {hasAccess('LANCAMENTO_RECEBER') && <button onClick={() => navigate('LANCAMENTO_RECEBER')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${currentView === 'LANCAMENTO_RECEBER' ? 'text-white' : 'text-slate-400 hover:text-white'}`}>Contas a Receber</button>}

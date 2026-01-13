@@ -1,4 +1,5 @@
 
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { DataService } from '../services/dataService';
 import { AccountsReceivable } from '../types';
@@ -28,9 +29,9 @@ const DelinquencyModule: React.FC = () => {
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 
     return data.filter(item => {
-      if (!item.dataVencimento || item.saldo <= 0.01) return false;
+      if (!item.data_vencimento || item.saldo <= 0.01) return false;
       
-      const [year, month, day] = item.dataVencimento.split('-').map(Number);
+      const [year, month, day] = item.data_vencimento.split('-').map(Number);
       const dueDate = new Date(year, month - 1, day).getTime();
       const diffDays = Math.ceil((today - dueDate) / (1000 * 60 * 60 * 24));
       
@@ -52,7 +53,7 @@ const DelinquencyModule: React.FC = () => {
 
       return true;
     }).map(item => {
-      const [year, month, day] = item.dataVencimento.split('-').map(Number);
+      const [year, month, day] = item.data_vencimento.split('-').map(Number);
       const dueDate = new Date(year, month - 1, day).getTime();
       const diffDays = Math.ceil((today - dueDate) / (1000 * 60 * 60 * 24));
       return { ...item, daysOverdue: diffDays };
@@ -63,10 +64,10 @@ const DelinquencyModule: React.FC = () => {
     const exportData = processedData.map(d => ({
       "ID": d.id,
       "CLIENTE": d.cliente,
-      "VENCIMENTO": d.dataVencimento.split('-').reverse().join('/'),
+      "VENCIMENTO": d.data_vencimento.split('-').reverse().join('/'),
       "DIAS EM ATRASO": d.daysOverdue,
       "VALOR SALDO": d.saldo,
-      "FORMA PAGTO": d.formaPagamento,
+      "FORMA PAGTO": d.forma_pagamento,
       "SITUAÇÃO": d.situacao,
       "CATEGORIA": d.categoria
     }));
@@ -150,7 +151,7 @@ const DelinquencyModule: React.FC = () => {
                   {item.cliente}
                 </td>
                 <td className="px-8 py-6 border-b border-slate-100 font-bold text-[11px] text-slate-500">
-                  {item.dataVencimento.split('-').reverse().join('/')}
+                  {item.data_vencimento.split('-').reverse().join('/')}
                 </td>
                 <td className="px-8 py-6 border-b border-slate-100 text-center">
                   <div className={`inline-flex px-3 py-1 rounded-lg font-black text-[10px] uppercase border ${
@@ -163,7 +164,7 @@ const DelinquencyModule: React.FC = () => {
                   R$ {(item.saldo || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </td>
                 <td className="px-8 py-6 border-b border-slate-100 font-black text-blue-600 text-[10px] uppercase italic">
-                  {item.formaPagamento}
+                  {item.forma_pagamento}
                 </td>
                 <td className="px-8 py-6 border-b border-slate-100 text-center font-bold text-slate-300 text-[10px]">
                   #{item.id}

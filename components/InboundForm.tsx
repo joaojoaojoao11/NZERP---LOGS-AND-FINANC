@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { DataService } from '../services/dataService';
-import { User, StockItem, MasterProduct, WarehouseLayout } from '../types';
+import { User, StockItem, MasterProduct } from '../types';
 import { ICONS, INBOUND_REASONS } from '../constants';
 import Toast from './Toast';
 import { jsPDF } from 'jspdf';
@@ -9,7 +9,6 @@ import QRCode from 'qrcode';
 
 const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, onSuccess }) => {
   const [catalog, setCatalog] = useState<MasterProduct[]>([]);
-  const [layout, setLayout] = useState<WarehouseLayout>({ columns: ['A'], shelvesPerColumn: { 'A': ['1'] } });
   const [draftItems, setDraftItems] = useState<StockItem[]>([]);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -32,7 +31,6 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
 
   const generateRandomLpn = () => {
     // Formato solicitado: NZ-XXXX (4 dígitos numéricos)
-    // Gera um número entre 1000 e 9999
     const random = Math.floor(1000 + Math.random() * 9000).toString();
     return `NZ-${random}`;
   };
@@ -40,33 +38,17 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [currentCatalog, currentLayout] = await Promise.all([
-          DataService.getMasterCatalog(),
-          DataService.getLayout()
-        ]);
+        const currentCatalog = await DataService.getMasterCatalog();
         setCatalog(currentCatalog);
-        setLayout(currentLayout);
-
-        // Sincronização automática com a estrutura real do Mapa do Pátio
-        if (currentLayout.columns && currentLayout.columns.length > 0) {
-          const firstCol = currentLayout.columns[0];
-          const shelves = currentLayout.shelvesPerColumn[firstCol] || ['1'];
-          setFormData((prev: any) => ({
-            ...prev,
-            coluna: firstCol,
-            prateleira: shelves[0]
-          }));
-        }
       } catch (e) {
         console.error("Error fetching initial data for InboundForm:", e);
-        setToast({ msg: "Erro ao carregar dados do Mapa de Pátio.", type: 'error' });
+        setToast({ msg: "Erro ao carregar catálogo.", type: 'error' });
       }
     };
     fetchData();
   }, []);
 
   const downloadTemplate = () => {
-    // Removida coluna metragemPadrao pois vem do cadastro
     const headers = "sku;quantMl;lote;nfControle;coluna;prateleira;nCaixa;observacao;motivoEntrada";
     const example = "\nNZW01;15.50;LOTE-ABC;NF-1234;A;1;CX-81;OK;Compra";
     const blob = new Blob(["\ufeff" + headers + example], { type: 'text/csv;charset=utf-8;' });
@@ -98,12 +80,11 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
 
   const addItemToDraft = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.sku || !formData.quantMl || !formData.lote || !formData.coluna || !formData.prateleira || !formData.nfControle) {
-      setToast({ msg: 'CAMPOS OBRIGATÓRIOS AUSENTES.', type: 'error' });
+    if (!formData.sku || !formData.quantMl || !formData.lote || !formData.nfControle) {
+      setToast({ msg: 'PREENCHA OS CAMPOS OBRIGATÓRIOS.', type: 'error' });
       return;
     }
     
-    // Lógica Automática de Status do Rolo (Manual)
     const qty = Number(formData.quantMl);
     const std = Number(formData.metragemPadrao || 15);
     const calculatedStatus = qty < std ? 'ROLO ABERTO' : 'ROLO FECHADO';
@@ -111,8 +92,11 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
     const newItem: StockItem = {
       ...formData,
       lpn: generateRandomLpn(),
-      statusRolo: calculatedStatus, // Aplica lógica
+      statusRolo: calculatedStatus, 
       nCaixa: formData.nCaixa || 'N/A',
+      // Default para vazio se não preenchido
+      coluna: formData.coluna ? formData.coluna.toUpperCase() : 'GERAL',
+      prateleira: formData.prateleira ? formData.prateleira.toUpperCase() : 'CHÃO',
       ultAtuali: new Date().toISOString(), 
       responsavel: user.name,
       dataEntrada: new Date().toISOString(),
@@ -124,13 +108,12 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
     };
     
     setDraftItems([newItem, ...draftItems]);
+    // Mantém a localização para facilitar próxima entrada
     setFormData({ 
       ...formData, 
       sku: '', nome: '', categoria: '', marca: '', fornecedor: '', 
       quantMl: 0, lote: '', nfControle: '', custoUnitario: 0, 
       nCaixa: '', observacao: '', 
-      coluna: formData.coluna, 
-      prateleira: formData.prateleira,
       motivoEntrada: formData.motivoEntrada,
     });
     setSearchTerm('');
@@ -159,9 +142,9 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
           const values = line.split(separator).map(v => v.trim());
           const item: any = { 
             observacao: '', nCaixa: 'N/A', 
-            // Default temporário, será recalculado abaixo
             statusRolo: 'ROLO FECHADO', 
-            motivoEntrada: INBOUND_REASONS[0], custoUnitario: 0 
+            motivoEntrada: INBOUND_REASONS[0], custoUnitario: 0,
+            coluna: 'GERAL', prateleira: 'CHÃO'
           };
 
           headers.forEach((h, i) => {
@@ -176,23 +159,16 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
             else if (h.includes('caixa')) item.nCaixa = val.toUpperCase();
             else if (h.includes('obs')) item.observacao = val;
             else if (h.includes('motivo entrada')) item.motivoEntrada = val;
-            // Campos opcionais, se vierem no CSV, sobrescrevem o mestre (mas idealmente vêm do mestre)
             else if (h.includes('status rolo')) item.statusRolo = val.toUpperCase();
           });
 
           const master = catalog.find(p => p.sku === item.sku);
           if (item.sku && master) {
-            // Usa a nova função de LPN com formato NZ-XXXX
             const lpn = generateRandomLpn();
-            
-            // LÓGICA DE NEGÓCIO PRINCIPAL:
-            // 1. Pega metragem padrão do cadastro mestre
             const stdMetragem = Number(master.metragemPadrao || 15);
             const inputQuant = Number(item.quantMl || 0);
             
-            // 2. Determina Status: Se quantidade entrada < padrão, é ROLO ABERTO
             let calculatedStatus = item.statusRolo; 
-            // Se o usuário não definiu explicitamente no CSV, aplica regra automática
             if (!headers.some(h => h.includes('status rolo'))) {
                calculatedStatus = inputQuant < stdMetragem ? 'ROLO ABERTO' : 'ROLO FECHADO';
             }
@@ -217,7 +193,6 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
         setToast({ msg: `ERRO CSV: ${err.message}`, type: 'error' });
       } finally {
         setIsProcessing(false);
-        // Limpar input
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     };
@@ -264,7 +239,7 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
       <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase italic leading-none">Registrar Entrada</h2>
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2 italic">Geração Automática de LPN (NZ-XXXX)</p>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2 italic">Entrada manual ou importação sem validação de layout</p>
         </div>
         <button onClick={() => setIsImportModalOpen(true)} className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg flex items-center space-x-2 italic">
           <ICONS.Upload className="w-4 h-4" />
@@ -304,25 +279,26 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
               </div>
             </div>
 
+            {/* CAMPOS DE LOCALIZAÇÃO TEXTO LIVRE */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                <div className="space-y-1.5">
-                 <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest italic">Posição: Coluna</label>
+                 <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest italic">Localização (Texto Livre)</label>
                  <input 
                     type="text"
                     value={formData.coluna} 
                     onChange={e => setFormData({...formData, coluna: e.target.value.toUpperCase()})} 
                     className="w-full px-8 py-5 bg-slate-50 border-2 border-transparent focus:border-blue-600 rounded-[1.8rem] font-black text-xs outline-none shadow-inner uppercase italic"
-                    placeholder="COLUNA"
+                    placeholder="DIGITE A COLUNA / ZONA..."
                  />
                </div>
                <div className="space-y-1.5">
-                 <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest italic">Posição: Nível</label>
+                 <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest italic">Nível / Prateleira (Texto Livre)</label>
                  <input 
                     type="text"
                     value={formData.prateleira} 
                     onChange={e => setFormData({...formData, prateleira: e.target.value.toUpperCase()})} 
                     className="w-full px-8 py-5 bg-slate-50 border-2 border-transparent focus:border-blue-600 rounded-[1.8rem] font-black text-xs outline-none shadow-inner uppercase italic"
-                    placeholder="NÍVEL"
+                    placeholder="DIGITE O NÍVEL..."
                  />
                </div>
             </div>
@@ -343,7 +319,7 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
                <input value={formData.observacao} onChange={e => setFormData({...formData, observacao: e.target.value.toUpperCase()})} className="w-full px-8 py-5 bg-slate-50 border-2 border-transparent focus:border-blue-600 rounded-[1.8rem] font-black text-xs outline-none shadow-inner italic" placeholder="EX: EMBALAGEM DANIFICADA..." />
             </div>
 
-            <button type="submit" className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black text-sm hover:bg-blue-600 transition-all uppercase tracking-widest shadow-2xl active:scale-95 italic">Lançar na Entrada Manual</button>
+            <button type="submit" className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black text-sm hover:bg-blue-600 transition-all uppercase tracking-widest shadow-2xl active:scale-95 italic">Lançar Entrada</button>
           </form>
         </div>
 
@@ -365,7 +341,7 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
                     <p className="text-blue-400 font-black text-[11px] uppercase tracking-tight">{it.sku}</p>
                   </div>
                   <p className="text-[9px] text-slate-300 font-bold uppercase truncate max-w-[150px] leading-tight">{it.nome}</p>
-                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{it.statusRolo}</p>
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{it.statusRolo} • {it.coluna}-{it.prateleira}</p>
                 </div>
                 <button onClick={() => setDraftItems(draftItems.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-400 transition-transform hover:scale-110"><ICONS.Add className="w-6 h-6 rotate-45" /></button>
               </div>
@@ -398,10 +374,10 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
                 <div className="p-12 text-center space-y-8 flex-1 flex flex-col justify-center">
                    <div className="w-24 h-24 bg-blue-50 text-blue-600 rounded-3xl flex items-center justify-center mx-auto shadow-inner"><ICONS.Upload className="w-12 h-12" /></div>
                    <div className="max-w-xl mx-auto">
-                      <p className="text-slate-500 font-medium text-sm mb-8">Baixe nosso modelo logístico oficial para preencher os volumes do pátio.</p>
+                      <p className="text-slate-500 font-medium text-sm mb-8">Baixe nosso modelo logístico oficial. As colunas e prateleiras são texto livre.</p>
                       <div className="flex gap-4 justify-center">
                          <button onClick={downloadTemplate} className="px-8 py-4 bg-white border-2 border-slate-200 text-slate-700 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center space-x-3">
-                            <span>Baixar Modelo Logístico</span>
+                            <span>Baixar Modelo</span>
                          </button>
                          <button onClick={() => fileInputRef.current?.click()} className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase shadow-xl hover:bg-blue-600 transition-all flex items-center space-x-3">
                             <ICONS.Add className="w-5 h-5" />
