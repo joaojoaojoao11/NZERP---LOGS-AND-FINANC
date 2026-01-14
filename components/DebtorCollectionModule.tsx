@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { DataService } from '../services/dataService';
 import { FinanceService } from '../services/financeService';
@@ -81,10 +80,11 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
       const clientHistoryData = await FinanceService.getCollectionHistoryByClient(cliente);
       const today = new Date().toISOString().split('T')[0];
       
-      // Filtro Rigoroso: Apenas BOLETOS VENCIDOS (incluindo Cartório) sem acordo ativo
+      // Filtro Rigoroso: Apenas BOLETOS VENCIDOS (incluindo Cartório) sem acordo ativo e ignorando CANCELADOS
       const filtered = allAR.filter(t => 
         t.cliente === cliente && 
         t.saldo > 0.01 && 
+        (t.situacao || '').toUpperCase() !== 'CANCELADO' && // Garante que não mostre cancelados
         !t.id_acordo && // Não está em acordo
         (t.forma_pagamento || '').toUpperCase().includes('BOLETO') && // É Boleto
         (t.data_vencimento && t.data_vencimento < today) // Está Vencido
@@ -99,7 +99,6 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
     }
   };
 
-  // ... (Funções de cartório mantidas iguais) ...
   const handleSendToCartorio = async () => {
     if (selectedForAgreement.length === 0) return;
     if (!window.confirm(`Confirma o envio de ${selectedForAgreement.length} títulos para protesto em cartório?`)) return;
@@ -315,7 +314,6 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
     return parts;
   }, [agreementConfig, totalSelectedForAgreement]);
 
-  // Função para gerar o PDF do Acordo
   const generateAgreementPDF = async (
     agreementId: string,
     clientName: string,
