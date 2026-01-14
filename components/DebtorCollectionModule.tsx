@@ -80,15 +80,26 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
       const clientHistoryData = await FinanceService.getCollectionHistoryByClient(cliente);
       const today = new Date().toISOString().split('T')[0];
       
-      // Filtro Rigoroso: Apenas BOLETOS VENCIDOS (incluindo Cartório) sem acordo ativo e ignorando CANCELADOS
-      const filtered = allAR.filter(t => 
-        t.cliente === cliente && 
-        t.saldo > 0.01 && 
-        (t.situacao || '').toUpperCase() !== 'CANCELADO' && // Garante que não mostre cancelados
-        !t.id_acordo && // Não está em acordo
-        (t.forma_pagamento || '').toUpperCase().includes('BOLETO') && // É Boleto
-        (t.data_vencimento && t.data_vencimento < today) // Está Vencido
-      );
+      // Filtro Rigoroso: Apenas BOLETOS VENCIDOS em aberto (Em Aberto ou Cartório)
+      // Exclui explicitamente CANCELADOS, PAGOS e NEGOCIADOS
+      const filtered = allAR.filter(t => {
+        const situacao = (t.situacao || '').toUpperCase().trim();
+        const formaPagamento = (t.forma_pagamento || '').toUpperCase();
+        const isBoleto = formaPagamento.includes('BOLETO');
+        const isOverdue = t.data_vencimento && t.data_vencimento < today;
+        
+        // Situações que representam dívida ativa e não resolvida
+        const situacoesPermitidas = ['ABERTO', 'EM ABERTO', 'CARTORIO', 'EM CARTORIO'];
+        
+        return (
+          t.cliente === cliente && 
+          t.saldo > 0.01 && 
+          !t.id_acordo && 
+          isBoleto && 
+          isOverdue &&
+          situacoesPermitidas.includes(situacao)
+        );
+      });
       
       setClientTitles(filtered);
       setClientHistory(clientHistoryData);
@@ -1069,7 +1080,7 @@ const DebtorCollectionModule: React.FC<{ currentUser: User }> = ({ currentUser }
                              </div>
                           )}
 
-                          <button type="submit" disabled={isSubmittingInteraction} className="w-full py-5 bg-blue-600 text-white rounded-[1.5rem] font-black text-[11px] uppercase tracking-widest shadow-xl italic">Registrar Ocorrência</button>
+                          <button type="submit" disabled={isSubmittingInteraction} className="w-full py-5 bg-blue-600 text-white rounded-[11px] font-black text-[11px] uppercase tracking-widest shadow-xl italic">Registrar Ocorrência</button>
                        </form>
                     </div>
                  )}

@@ -1,4 +1,3 @@
-
 import { supabaseClient as supabase } from './core';
 import { InventoryService } from './inventoryService';
 import { FinanceService } from './financeService';
@@ -140,64 +139,68 @@ export class DataService {
   static async setAuditLock(lock: any): Promise<void> { }
 
   static async getDebtorsSummary(): Promise<DebtorInfo[]> {
-    // 1. Busca Títulos
-    const ar = await this.getAccountsReceivable();
-    
-    // 2. Busca Histórico de Cobrança para identificar agendamentos
-    const { data: historyData } = await supabase
-        .from('collection_history')
-        .select('cliente, data_proxima_acao')
-        .order('data_registro', { ascending: false });
-
-    // Mapa de última data de ação por cliente
+    const [ar, { data: historyData }] = await Promise.all([
+      this.getAccountsReceivable(),
+      supabase.from('collection_history').select('cliente, data_proxima_acao').order('data_registro', { ascending: false })
+    ]);
+  
     const nextActionMap: Record<string, string> = {};
     if (historyData) {
-        historyData.forEach((h: any) => {
-            if (!nextActionMap[h.cliente] && h.data_proxima_acao) {
-                nextActionMap[h.cliente] = h.data_proxima_acao;
-            }
-        });
+      historyData.forEach((h: any) => {
+        if (!nextActionMap[h.cliente] && h.data_proxima_acao) {
+          nextActionMap[h.cliente] = h.data_proxima_acao;
+        }
+      });
     }
-
-    const today = new Date(); today.setHours(0,0,0,0);
+  
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const debtorsMap: Record<string, DebtorInfo> = {};
-    
-    ar.filter(t => t.saldo > 0.01 && !t.id_acordo).forEach(t => {
-      const dueDate = new Date(t.data_vencimento!); if (dueDate >= today) return;
-      
+  
+    ar.forEach(t => {
+      const situacao = (t.situacao || '').toUpperCase().trim();
+      const isDebtActiveAndOverdue = 
+          !['CANCELADO', 'PAGO', 'LIQUIDADO', 'NEGOCIADO'].includes(situacao) &&
+          t.saldo > 0.01 &&
+          !t.id_acordo &&
+          t.data_vencimento && new Date(t.data_vencimento) < today;
+  
+      if (!isDebtActiveAndOverdue) return;
+  
+      const dueDate = new Date(t.data_vencimento!);
+  
       if (!debtorsMap[t.cliente]) {
-        debtorsMap[t.cliente] = { 
-          cliente: t.cliente, 
-          totalVencido: 0, 
-          vencidoAte15d: 0, 
-          vencidoMais15d: 0, 
-          enviarCartorio: 0, 
-          qtdTitulos: 0, 
-          statusCobranca: 'PENDENTE', 
-          protocoloAtual: `COB-${Date.now().toString().slice(-6)}`, 
+        debtorsMap[t.cliente] = {
+          cliente: t.cliente,
+          totalVencido: 0,
+          vencidoAte15d: 0,
+          vencidoMais15d: 0,
+          enviarCartorio: 0,
+          qtdTitulos: 0,
+          statusCobranca: 'PENDENTE',
+          protocoloAtual: `COB-${Date.now().toString().slice(-6)}`,
           enviadoCartorio: false,
-          nextActionDate: nextActionMap[t.cliente] // Associa a data encontrada
+          nextActionDate: nextActionMap[t.cliente]
         };
       }
-      
-      const info = debtorsMap[t.cliente]; 
-      info.totalVencido += t.saldo; 
+  
+      const info = debtorsMap[t.cliente];
+      info.totalVencido += t.saldo;
       info.qtdTitulos += 1;
-
-      // Lógica atualizada para buckets
+  
       if (t.statusCobranca === 'CARTORIO') {
         info.enviarCartorio += t.saldo;
         info.enviadoCartorio = true;
       } else {
         const diffDays = Math.ceil((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
         if (diffDays <= 15) {
-          info.vencidoAte15d += t.saldo; 
+          info.vencidoAte15d += t.saldo;
         } else {
           info.vencidoMais15d += t.saldo;
         }
       }
     });
-    
+  
     return Object.values(debtorsMap).sort((a, b) => b.totalVencido - a.totalVencido);
   }
 
