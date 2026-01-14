@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { DataService } from '../services/dataService';
 import { User, StockItem, MasterProduct } from '../types';
@@ -208,13 +207,122 @@ const InboundForm: React.FC<{ user: User, onSuccess: () => void }> = ({ user, on
     }
   };
 
+  // --- NOVA FUNÇÃO PARA GERAR O PDF DO ROMANEIO ---
+  const generateInboundReceipt = (items: StockItem[]) => {
+    const doc = new jsPDF();
+    const dateStr = new Date().toLocaleString('pt-BR');
+    
+    // Cabeçalho Profissional - Estilo Contorno Preto
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.5);
+    doc.rect(10, 5, 190, 28); // Retângulo de contorno
+    
+    doc.setTextColor(0, 0, 0); // Texto preto
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('ROMANEIO DE ENTRADA', 105, 15, { align: 'center' });
+    
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text('NZSTOK - GESTÃO DE SUPRIMENTOS', 105, 22, { align: 'center' });
+    doc.text(`DATA: ${dateStr}  |  RESPONSÁVEL: ${user.name.toUpperCase()}`, 105, 28, { align: 'center' });
+
+    let y = 45;
+    
+    // Resumo do Lote
+    const totalItens = items.length;
+    const totalMl = items.reduce((acc, i) => acc + i.quantMl, 0);
+    
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`RESUMO DO LOTE: ${totalItens} VOLUMES  |  TOTAL: ${totalMl.toFixed(2)} ML`, 10, y);
+    
+    y += 10;
+
+    // Cabeçalho da Tabela
+    doc.setFillColor(241, 245, 249); // Slate 100
+    doc.rect(10, y - 5, 190, 8, 'F');
+    doc.setFontSize(8);
+    doc.setTextColor(71, 85, 105); // Slate 600
+    
+    doc.text('PROTOCOL LPN', 15, y);
+    doc.text('SKU / MATERIAL', 50, y);
+    doc.text('LOTE', 120, y);
+    doc.text('LOCAL', 150, y);
+    doc.text('QTD (ML)', 190, y, { align: 'right' });
+    
+    y += 8;
+
+    // Itens
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+
+    items.forEach((item, index) => {
+      // Quebra de página se necessário
+      if (y > 270) {
+        doc.addPage();
+        y = 20;
+        // Repete cabeçalho simples na nova página
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text(`ROMANEIO DE ENTRADA (CONT.) - ${dateStr}`, 10, 10);
+        doc.setTextColor(0);
+      }
+
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.text(item.lpn, 15, y); // LPN em Negrito
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text(item.sku, 50, y);
+      
+      // Nome truncado para não sobrepor
+      const nomeTrunc = item.nome.length > 35 ? item.nome.substring(0, 35) + '...' : item.nome;
+      doc.setFontSize(7);
+      doc.setTextColor(100);
+      doc.text(nomeTrunc, 50, y + 4); // Nome abaixo do SKU
+      doc.setTextColor(0);
+      doc.setFontSize(8);
+
+      doc.text(item.lote, 120, y);
+      doc.text(`${item.coluna}-${item.prateleira}`, 150, y);
+      
+      doc.setFont('helvetica', 'bold');
+      doc.text(item.quantMl.toFixed(2), 190, y, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+
+      // Linha separadora suave
+      doc.setDrawColor(226, 232, 240); // Slate 200
+      doc.line(10, y + 6, 200, y + 6);
+
+      y += 12; // Espaço para próxima linha
+    });
+
+    // Rodapé
+    const pageCount = doc.getNumberOfPages();
+    for(let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7);
+        doc.setTextColor(150);
+        doc.text(`Página ${i} de ${pageCount} - Gerado automaticamente pelo sistema NZERP`, 105, 290, { align: 'center' });
+    }
+
+    doc.save(`COMPROVANTE_ENTRADA_${Date.now()}.pdf`);
+  };
+
   const handleFinalSubmit = async () => {
     if (draftItems.length === 0) return;
     setIsSubmitting(true);
     try {
       const res = await DataService.processInboundBatch(draftItems, user);
       if (res.success) {
-        setToast({ msg: 'SINCRONIZAÇÃO CONCLUÍDA!', type: 'success' });
+        setToast({ msg: 'SINCRONIZAÇÃO CONCLUÍDA! GERANDO COMPROVANTE...', type: 'success' });
+        
+        // GERA O PDF ANTES DE LIMPAR
+        generateInboundReceipt(draftItems);
+        
         setDraftItems([]);
         setTimeout(onSuccess, 1500);
       } else throw new Error(res.message);
